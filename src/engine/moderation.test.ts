@@ -35,3 +35,23 @@ describe('멈추기', () => {
     expect(activeFreeze(undefined, 1)).toBeNull();
   });
 });
+
+import { buildSchedule, fallMsAt, normalizeFallSpeed } from './battle';
+describe('점수별 낙하 속도', () => {
+  const pool = ['ㅁㄴㅇㄹ', '학교', '강아지', '쉬는 시간', '착한 친구', '신호등'];
+  it('속도를 주지 않으면 예전과 같고, 주면 점수별로 낙하 시간이 달라진다', () => {
+    const a = buildSchedule(7, pool, 4, 60);
+    const b = buildSchedule(7, pool, 4, 60, { p1: 100, p2: 100, p4: 100 });
+    expect(b).toEqual(a);
+    const c = buildSchedule(7, pool, 4, 60, { p1: 100, p2: 125, p4: 200 });
+    expect(c.length).toBeGreaterThan(10);
+    for (const w of c) {
+      const m = w.points === 4 ? 2 : w.points === 2 ? 1.25 : 1;
+      expect(w.fallMs).toBe(Math.round(fallMsAt(w.spawnAt, 60000) / m));
+    }
+  });
+  it('값을 50~200 으로 정리한다', () => {
+    expect(normalizeFallSpeed(undefined)).toEqual({ p1: 100, p2: 115, p4: 130 });
+    expect(normalizeFallSpeed({ p1: 10, p2: 999, p4: 150 })).toEqual({ p1: 50, p2: 200, p4: 150 });
+  });
+});

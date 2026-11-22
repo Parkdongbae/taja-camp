@@ -5,7 +5,9 @@
 //   interface FallingWord { index: number; text: string; points: 1|2|4; spawnAt: number(ms, 시작 기준); fallMs: number; x: number(0~1, 낱말 가운데의 가로 위치) }
 //   concurrentCount(playerCount: number): number      4 + floor(인원/2), 최대 12
 //   fallMsAt(elapsedMs: number, durationMs: number): number   10000 → 6000 선형
-//   buildSchedule(seed: number, pool: string[], playerCount: number, durationSec: number): FallingWord[]
+//   normalizeFallSpeed(x?): FallSpeed   점수별 낙하 속도(%)를 50~200 으로 정리(없으면 기본값)
+//   buildSchedule(seed: number, pool: string[], playerCount: number, durationSec: number, speed?: FallSpeed): FallingWord[]
+//     - speed 를 주면 낱말의 fallMs = 기본 낙하 시간 ÷ (점수별 속도 ÷ 100). 등장 간격은 기본 낙하 시간 그대로.
 //     - pool 은 NFC·trim·중복 제거·칠 수 없는 것 제외 후 코드 단위 순서로 다시 정렬한다.
 //     - 등장 간격 = fallMs ÷ 동시 낱말 수. 경기 끝 1초 전까지 등장.
 //     - 같은 낱말이 동시에 2개 뜨지 않음. x 는 (동시 수 + 2)개 칸에 나눠, 떠 있는 낱말과 칸이 겹치지 않게.
@@ -17,6 +19,18 @@
 import { battlePoints } from './scoring';
 import { isTypeable, normalizeText } from './hangul';
 import { mulberry32, randInt, shuffle } from './rng';
+import { DEFAULT_FALL_SPEED, type FallSpeed } from '../data/types';
+
+export const FALL_SPEED_MIN = 50;
+export const FALL_SPEED_MAX = 200;
+
+export function normalizeFallSpeed(x?: Partial<FallSpeed> | null): FallSpeed {
+  const one = (v: unknown, d: number) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) && n > 0 ? Math.max(FALL_SPEED_MIN, Math.min(FALL_SPEED_MAX, n)) : d;
+  };
+  return { p1: one(x?.p1, DEFAULT_FALL_SPEED.p1), p2: one(x?.p2, DEFAULT_FALL_SPEED.p2), p4: one(x?.p4, DEFAULT_FALL_SPEED.p4) };
+}
 
 export { mulberry32 };
 
@@ -63,7 +77,17 @@ class Deck {
   }
 }
 
-export function buildSchedule(seed: number, pool: string[], playerCount: number, durationSec: number): FallingWord[] {
+export function buildSchedule(
+  seed: number,
+  pool: string[],
+  playerCount: number,
+  durationSec: number,
+  speed?: FallSpeed | null,
+): FallingWord[] {
+  const mult: Record<1 | 2 | 4, number> = speed
+    ? { 1: normalizeFallSpeed(speed).p1 / 100, 2: normalizeFallSpeed(speed).p2 / 100, 4: normalizeFallSpeed(speed).p4 / 100 }
+    : { 1: 1, 2: 1, 4: 1 };
+  const maxFall = Math.ceil(10000 / Math.min(mult[1], mult[2], mult[4]));
   const uniq = [...new Set(pool.map((w) => normalizeText(w).trim().replace(/\s+/g, ' ')))].filter(
     (w) => w && isTypeable(w),
   );
@@ -96,7 +120,7 @@ export function buildSchedule(seed: number, pool: string[], playerCount: number,
     const visIdx: number[] = [];
     for (let i = out.length - 1; i >= 0; i--) {
       if (out[i].spawnAt + out[i].fallMs > t) visIdx.push(i);
-      else if (t - out[i].spawnAt > 10000) break; // 더 앞은 이미 다 떨어짐
+      else if (t - out[i].spawnAt > maxFall) break; // 더 앞은 이미 다 떨어짐
     }
     const visible = new Set(visIdx.map((i) => out[i].text));
 
@@ -139,7 +163,7 @@ export function buildSchedule(seed: number, pool: string[], playerCount: number,
       const lane = cands[randInt(rand, cands.length)];
       const jitter = (rand() - 0.5) * 0.3;
       const x = Math.round(((lane + 0.5 + jitter) / lanes) * 10000) / 10000;
-      out.push({ index: out.length, text, points, spawnAt: t, fallMs: fall, x });
+      out.push({ index: out.length, text, points, spawnAt: t, fallMs: Math.round(fall / mult[points]), x });
       laneOf.push(lane);
       lastLane = lane;
       if (points === 4) count4++;

@@ -673,7 +673,7 @@ export function createLocalBackend(): Backend {
       return watch([K.rooms], () => rooms()[roomId] ?? null, cb);
     },
 
-    async startRoom(roomId) {
+    async startRoom(roomId, fall) {
       const u = me();
       const myId = u && u.role === 'student' ? u.studentId : null;
       await roomLock((rs) => {
@@ -685,6 +685,7 @@ export function createLocalBackend(): Backend {
         r.seed = random32();
         r.startAt = Date.now() + 5000;
         r.startCount = Object.values(r.players).filter((p) => p.online !== false).length;
+        if (fall) r.fall = { p1: fall.p1, p2: fall.p2, p4: fall.p4 };
       });
     },
 

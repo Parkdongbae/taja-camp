@@ -139,6 +139,14 @@ export interface SessionRecord {
   createdAt: number;
 }
 
+/** 배틀 낱말이 떨어지는 속도(%). 점수별. 100 = 기본, 클수록 빠름 */
+export interface FallSpeed {
+  p1: number;
+  p2: number;
+  p4: number;
+}
+export const DEFAULT_FALL_SPEED: FallSpeed = { p1: 100, p2: 115, p4: 130 };
+
 export interface Settings {
   battleEnabled: boolean;
   /** 배틀 임시 공개: 켜면 자리 단계와 상관없이 누구나 배틀(한글·영문)에 들어간다. 옛 문서에는 없을 수 있다 */
@@ -158,6 +166,8 @@ export interface Settings {
   badWordSeconds?: number;
   /** 선생님이 추가한 욕설 */
   badWordsExtra?: string[];
+  /** 배틀 점수별 낙하 속도(%). 방이 시작될 때 방에 복사된다 */
+  fallSpeed?: FallSpeed;
 }
 export const DEFAULT_SETTINGS: Settings = {
   battleEnabled: true,
@@ -173,6 +183,7 @@ export const DEFAULT_SETTINGS: Settings = {
   badWordBlock: true,
   badWordSeconds: 10,
   badWordsExtra: [],
+  fallSpeed: DEFAULT_FALL_SPEED,
 };
 
 // ───────── 인증 ─────────
@@ -232,6 +243,8 @@ export interface BattleRoom {
   claims: Record<string, { by: string; at: number }>;
   /** 멈추기: 쓴 사람 학번 → 시작 시각(서버 ms)·길이(ms). 한 판에 한 사람 한 번 */
   freezes?: Record<string, { at: number; ms: number }>;
+  /** 이 판의 점수별 낙하 속도(%). 시작할 때 설정에서 복사(모든 참가자가 같은 일정을 만들기 위해). 없으면 100 */
+  fall?: FallSpeed;
 }
 export const BATTLE_MAX_PLAYERS = 16;
 export const BATTLE_DURATION_SEC = 120;

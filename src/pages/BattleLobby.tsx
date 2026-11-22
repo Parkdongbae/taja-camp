@@ -283,6 +283,7 @@ export default function BattleLobby() {
                   · <span className="text-white/50">기본자리 낱말 1점</span> · <span className="text-white">한 단어 2점</span> ·{' '}
                   <span className="text-gold">두 단어 4점</span>
                 </li>
+                <li>· 점수가 높은 낱말일수록 빨리 떨어져요</li>
                 <li>· 같은 낱말은 먼저 친 사람이 득점</li>
                 <li>· Space 나 Enter 로 제출, 틀리면 0.5초 멈춤</li>
                 {!!settings.freezePhrase && (

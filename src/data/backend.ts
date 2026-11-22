@@ -4,6 +4,7 @@ import type {
   AuthUser,
   BattlePlayer,
   BattleRoom,
+  FallSpeed,
   ContentBundle,
   Lang,
   Presence,
@@ -69,7 +70,7 @@ export interface Backend {
   leaveRoom(roomId: string, playerId: string): Promise<void>;
   watchRoom(roomId: string, cb: (room: BattleRoom | null) => void): Unsub;
   /** 방장만. state=playing, startAt=serverNow()+5000, seed 확정. */
-  startRoom(roomId: string): Promise<void>;
+  startRoom(roomId: string, fall?: FallSpeed): Promise<void>;
   /** 낱말 선점. 내가 처음이면 true. 원자적(트랜잭션)이어야 한다. */
   claimWord(roomId: string, wordIndex: number, playerId: string): Promise<boolean>;
   /** 경기 종료 표시(누가 호출해도 됨, 여러 번 호출 안전). */

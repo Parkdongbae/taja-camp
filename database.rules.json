@@ -60,6 +60,13 @@
             "$other": { ".validate": false }
           }
         },
+        "fall": {
+          // 점수별 낙하 속도(%). 시작할 때 방장이 수업 설정에서 복사한다.
+          "p1": { ".validate": "newData.isNumber() && newData.val() >= 50 && newData.val() <= 200" },
+          "p2": { ".validate": "newData.isNumber() && newData.val() >= 50 && newData.val() <= 200" },
+          "p4": { ".validate": "newData.isNumber() && newData.val() >= 50 && newData.val() <= 200" },
+          "$other": { ".validate": false }
+        },
         "freezes": {
           "$pid": {
             // 멈추기: 경기 중, 참가자 본인 칸이 비어 있을 때 한 번만. 이미 있는 값은 바꿀 수 없다.

@@ -21,6 +21,7 @@ import {
   type AuthUser,
   type BattlePlayer,
   type BattleRoom,
+  type FallSpeed,
   type ContentBundle,
   type Lang,
   type Presence,
@@ -162,6 +163,7 @@ function toRoom(id: string, v: unknown): BattleRoom | null {
     players: objOf<BattlePlayer>(r.players),
     claims: objOf<{ by: string; at: number }>(r.claims),
     freezes: objOf<{ at: number; ms: number }>(r.freezes),
+    ...(r.fall && typeof r.fall === 'object' ? { fall: r.fall as FallSpeed } : {}),
   };
 }
 
@@ -1023,7 +1025,7 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
       );
     },
 
-    startRoom(roomId) {
+    startRoom(roomId, fall) {
       return run(async (fb) => {
         const { D, db } = fb;
         const me = myStudentId();
@@ -1043,6 +1045,7 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
           cur.seed = random32();
           cur.startAt = serverNow() + 5000;
           cur.startCount = Object.values(players).filter((p) => p.online !== false).length;
+          if (fall) cur.fall = { p1: fall.p1, p2: fall.p2, p4: fall.p4 };
           return cur;
         });
         if (!res.snapshot.exists()) throw new AppError('ROOM_GONE', '방이 사라졌습니다.');

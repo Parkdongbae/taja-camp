@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useNavigate, useParams } from 'react-router-dom';
 import { backend } from '../data';
 import { BATTLE_MAX_PLAYERS, type BattleRoom } from '../data/types';
-import { buildSchedule } from '../engine/battle';
+import { buildSchedule, normalizeFallSpeed } from '../engine/battle';
 import { useAuth } from '../state/auth';
 import { useContent } from '../content';
 import { Btn, Kbd } from '../components/ui';
@@ -92,7 +92,7 @@ export default function BattleGame() {
     setStarting(true);
     setError('');
     try {
-      await backend.startRoom(roomId);
+      await backend.startRoom(roomId, normalizeFallSpeed(useAuth.getState().settings.fallSpeed));
     } catch {
       setError('시작하지 못했어요. 다시 눌러 주세요.');
     } finally {
@@ -127,9 +127,17 @@ export default function BattleGame() {
   const durationSec = room?.durationSec ?? 0;
   const lang = room?.lang ?? 'ko';
   const started = !!room && room.state !== 'waiting';
+  // 점수별 낙하 속도는 방에 적힌 값만 쓴다(참가자 모두 같은 일정)
+  const hasFall = !!room?.fall;
+  const fall1 = room?.fall?.p1 ?? 100;
+  const fall2 = room?.fall?.p2 ?? 100;
+  const fall4 = room?.fall?.p4 ?? 100;
   const schedule = useMemo(
-    () => (started && loaded ? buildSchedule(seed, battlePool(words, lang), startCount, durationSec) : null),
-    [started, loaded, seed, startCount, durationSec, lang, words],
+    () =>
+      started && loaded
+        ? buildSchedule(seed, battlePool(words, lang), startCount, durationSec, hasFall ? { p1: fall1, p2: fall2, p4: fall4 } : null)
+        : null,
+    [started, loaded, seed, startCount, durationSec, lang, words, hasFall, fall1, fall2, fall4],
   );
 
   const again = useCallback(

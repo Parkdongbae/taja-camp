@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BATTLE_DURATION_SEC, type BattleRoom, type Lang, type Student } from '../data/types';
-import { buildSchedule, type FallingWord } from '../engine/battle';
+import { buildSchedule, normalizeFallSpeed, type FallingWord } from '../engine/battle';
 import { botBaseKpm, createBotRunner, makeBots, nextSoloLevel, SOLO_LEVEL_MAX, SOLO_LEVEL_MIN, type Bot, type BotClaim } from '../engine/bots';
 import { rankPlayers, tierOf, type BattleRank } from '../engine/scoring';
 import { isBattleUnlocked, isEnBattleUnlocked } from '../engine/stages';
@@ -71,12 +71,13 @@ function SoloMatch({ lang, student, onAgain, onExit }: { lang: Lang; student: St
         ...Object.fromEntries(bots.map((b, i) => [b.id, { id: b.id, name: BOT_ICON + b.name, classNo: 0, joinedAt: i + 1, online: true }])),
       },
       claims: {},
+      fall: normalizeFallSpeed(useAuth.getState().settings.fallSpeed),
     };
     return { baseKpm, bots, level: student.solo?.level ?? 0, room };
   });
 
   const schedule = useMemo<FallingWord[]>(
-    () => buildSchedule(setup.room.seed, battlePool(words, lang), setup.room.startCount, BATTLE_DURATION_SEC),
+    () => buildSchedule(setup.room.seed, battlePool(words, lang), setup.room.startCount, BATTLE_DURATION_SEC, setup.room.fall),
     // 판 도중 콘텐츠가 바뀌어도 일정은 그대로
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],

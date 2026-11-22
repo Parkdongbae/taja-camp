@@ -5,6 +5,7 @@ import { backend } from '../../data';
 import { AppError, DEFAULT_SETTINGS, type Settings } from '../../data/types';
 import { Card } from '../../components/ui';
 import { BAD_WORD_COUNT, findBadWord, squash } from '../../engine/badwords';
+import { FALL_SPEED_MAX, FALL_SPEED_MIN, fallMsAt, normalizeFallSpeed } from '../../engine/battle';
 
 function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
@@ -32,7 +33,21 @@ function Row({ title, desc, children }: { title: string; desc: string; children:
   );
 }
 
-function Slider({ value, min, max, unit, onChange }: { value: number; min: number; max: number; unit: string; onChange: (n: number) => void }) {
+function Slider({
+  value,
+  min,
+  max,
+  unit,
+  step = 1,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  step?: number;
+  onChange: (n: number) => void;
+}) {
   // 끌고 있는 동안은 화면 값만 바꾸고, 놓을 때 저장한다
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
@@ -42,6 +57,7 @@ function Slider({ value, min, max, unit, onChange }: { value: number; min: numbe
         type="range"
         min={min}
         max={max}
+        step={step}
         value={v}
         className="flex-1 accent-mint-500"
         onChange={(e) => setV(Number(e.target.value))}
@@ -240,6 +256,35 @@ export default function ClassSettings() {
         <Row title="소리 허용" desc="타건음과 배틀 효과음. 끄면 학생이 소리를 켤 수 없어요.">
           <Toggle label="소리 허용" on={s.soundAllowed} onChange={(v) => void save({ soundAllowed: v })} />
         </Row>
+      </Card>
+
+      <h2 className="pt-2 text-lg font-black">배틀 낱말 속도</h2>
+      <Card className={loaded ? '' : 'opacity-60'}>
+        <div className="border-b border-mint-100 py-3 text-sm text-ink/60">
+          점수별로 낱말이 떨어지는 속도예요. 100%가 기본이고, 숫자가 클수록 빨리 떨어져요. 바꾼 값은 다음에 시작하는 판부터 적용돼요.
+        </div>
+        {(
+          [
+            ['p1', '1점 낱말 (기본자리)'],
+            ['p2', '2점 낱말 (한 단어)'],
+            ['p4', '4점 낱말 (두 단어)'],
+          ] as const
+        ).map(([k, title]) => {
+          const sp = normalizeFallSpeed(s.fallSpeed);
+          const sec = (ms: number) => (ms / (sp[k] / 100) / 1000).toFixed(1);
+          return (
+            <Row key={k} title={title} desc={`바닥까지 처음 ${sec(fallMsAt(0, 1))}초 → 끝날 무렵 ${sec(fallMsAt(1, 1))}초`}>
+              <Slider
+                value={sp[k]}
+                min={FALL_SPEED_MIN}
+                max={FALL_SPEED_MAX}
+                step={5}
+                unit="%"
+                onChange={(n) => void save({ fallSpeed: { ...sp, [k]: n } })}
+              />
+            </Row>
+          );
+        })}
       </Card>
 
       <h2 className="pt-2 text-lg font-black">배틀 멈추기</h2>
