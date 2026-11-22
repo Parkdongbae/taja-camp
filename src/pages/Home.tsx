@@ -39,7 +39,7 @@ export default function Home() {
 
   if (!student) return null;
   const passed = student.position.ko + student.position.symbol;
-  const unlocked = isBattleUnlocked(student.position);
+  const unlocked = !!settings.battleOpenAll || isBattleUnlocked(student.position); // 임시 공개 포함
   const tp = tierProgress(student.rp);
   const goalDone = student.lastDay === todayString() && student.todaySeconds >= settings.dailyGoalMinutes * 60;
   const level = levelOf(student.xp);

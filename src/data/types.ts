@@ -141,6 +141,8 @@ export interface SessionRecord {
 
 export interface Settings {
   battleEnabled: boolean;
+  /** 배틀 임시 공개: 켜면 자리 단계와 상관없이 누구나 배틀(한글·영문)에 들어간다. 옛 문서에는 없을 수 있다 */
+  battleOpenAll?: boolean;
   dailyGoalMinutes: number;
   passScore: number;
   testSecondsPerItem: number;
@@ -150,6 +152,7 @@ export interface Settings {
 }
 export const DEFAULT_SETTINGS: Settings = {
   battleEnabled: true,
+  battleOpenAll: false,
   dailyGoalMinutes: 10,
   passScore: 90,
   testSecondsPerItem: 3,

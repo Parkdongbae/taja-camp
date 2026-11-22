@@ -17,8 +17,11 @@ export default function BattleLobby() {
   const { student, settings } = useAuth();
   const navState = (loc.state ?? null) as LobbyState | null;
 
-  const unlocked = !!student && isBattleUnlocked(student.position);
-  const enUnlocked = !!student && isEnBattleUnlocked(student.position);
+  // 임시 공개(선생님 설정)면 자리 단계와 상관없이 연다
+  const openAll = !!settings.battleOpenAll;
+  const unlocked = !!student && (openAll || isBattleUnlocked(student.position));
+  const enUnlocked = !!student && (openAll || isEnBattleUnlocked(student.position));
+  const tempOpen = !!student && openAll && !isBattleUnlocked(student.position);
   const [langPick, setLangPick] = useState<Lang>(() => navState?.lang ?? readBattleLang());
   const lang: Lang = langPick === 'en' && enUnlocked ? 'en' : 'ko';
   const tp = tierProgress(student?.rp ?? 0);
@@ -163,6 +166,11 @@ export default function BattleLobby() {
     <div className="h-full bg-ink text-white">
       <div className="mx-auto flex h-full max-w-5xl flex-col gap-5 p-6">
         {notice && <div className="rounded-xl bg-gold/15 px-4 py-2 text-sm text-gold">{notice}</div>}
+        {tempOpen && (
+          <div className="rounded-xl bg-gold/15 px-4 py-2 text-sm text-gold">
+            선생님이 배틀을 임시로 열어 두었어요. 임시 공개가 끝나면 자리연습을 모두 통과해야 들어올 수 있어요.
+          </div>
+        )}
 
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-black">⚔️ 배틀 모드</h1>

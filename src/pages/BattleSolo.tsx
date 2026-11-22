@@ -28,9 +28,10 @@ export default function BattleSolo() {
   const nav = useNavigate();
   const loc = useLocation();
   const { student, settings } = useAuth();
-  const open = !!student && isBattleUnlocked(student.position) && settings.battleEnabled;
+  const openAll = !!settings.battleOpenAll; // 임시 공개
+  const open = !!student && (openAll || isBattleUnlocked(student.position)) && settings.battleEnabled;
   const want = ((loc.state ?? null) as LobbyState | null)?.lang ?? readBattleLang();
-  const lang: Lang = want === 'en' && student && isEnBattleUnlocked(student.position) ? 'en' : 'ko';
+  const lang: Lang = want === 'en' && student && (openAll || isEnBattleUnlocked(student.position)) ? 'en' : 'ko';
   const [gameNo, setGameNo] = useState(0);
   const loaded = useContent((s) => s.loaded);
 

@@ -102,6 +102,16 @@ export default function ClassSettings() {
         <Row title="배틀 허용" desc="끄면 학생은 배틀에 들어갈 수 없어요.">
           <Toggle label="배틀 허용" on={s.battleEnabled} onChange={(v) => void save({ battleEnabled: v })} />
         </Row>
+        <Row
+          title="배틀 임시 공개"
+          desc={
+            s.battleEnabled
+              ? '켜면 자리연습을 마치지 않은 학생도 배틀에 들어갈 수 있어요. 시험해 본 뒤에는 꼭 꺼 주세요.'
+              : '「배틀 허용」이 꺼져 있으면 임시 공개를 켜도 들어갈 수 없어요.'
+          }
+        >
+          <Toggle label="배틀 임시 공개" on={!!s.battleOpenAll} onChange={(v) => void save({ battleOpenAll: v })} />
+        </Row>
         <Row title="하루 목표 시간" desc="오늘의 훈련 목표(5~20분).">
           <Slider value={s.dailyGoalMinutes} min={5} max={20} unit="분" onChange={(n) => void save({ dailyGoalMinutes: n })} />
         </Row>
