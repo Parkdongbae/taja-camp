@@ -1,0 +1,168 @@
+rules_version = '2';
+
+// 타자 훈련소 Firestore 보안 규칙 (서버 함수 없음: 권한은 이 규칙으로만 강제)
+// - 학생: 익명 로그인 후 links/{uid} 를 만들어 학번과 연결한다. 링크 생성 시 이름·PIN 해시를 검증한다.
+// - 교사: 이메일 로그인 + teachers/{uid}. 첫 가입자는 config/owner 와 함께 관리자(owner)가 된다.
+//   그 뒤로는 invites/{이메일} 이 있는 사용자만 자기 teachers 문서를 만들 수 있다.
+// - 알려진 한계: PIN 무차별 대입을 막을 서버 측 횟수 제한이 없다(익명 계정을 새로 만들어 반복 시도 가능).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function studentPath(sid) { return /databases/$(database)/documents/students/$(sid); }
+    function secretPath(sid) { return /databases/$(database)/documents/secrets/$(sid); }
+    function linkPath(uid) { return /databases/$(database)/documents/links/$(uid); }
+    function teacherPath(uid) { return /databases/$(database)/documents/teachers/$(uid); }
+
+    function isTeacher() { return signedIn() && exists(teacherPath(request.auth.uid)); }
+    function isOwner() { return isTeacher() && get(teacherPath(request.auth.uid)).data.owner == true; }
+    function hasLink() { return signedIn() && exists(linkPath(request.auth.uid)); }
+    function myLink() { return get(linkPath(request.auth.uid)).data; }
+    function isStudent(sid) { return hasLink() && myLink().sid == sid; }
+    function isMember() { return isTeacher() || hasLink(); }
+
+    function nameMatches(sid, name) {
+      return exists(studentPath(sid)) && get(studentPath(sid)).data.name == name;
+    }
+
+    // ── 학생 ──
+    function studentKeys() {
+      return ['id', 'name', 'grade', 'classNo', 'number', 'position', 'stageBest', 'stageDrill',
+              'rp', 'wins', 'games', 'bestKo', 'bestEn', 'xp', 'quizPoints', 'totalSeconds', 'days', 'streak',
+              'lastDay', 'todaySeconds', 'weakKeys', 'badges', 'exam', 'solo', 'createdAt', 'lastLoginAt'];
+    }
+    function trackOk(pa, pb, t, max) {
+      return pb[t] is number && pb[t] >= pa[t] && pb[t] <= pa[t] + 1 && pb[t] <= max;
+    }
+    function selfUpdateOk() {
+      let a = resource.data;
+      let b = request.resource.data;
+      return b.keys().hasOnly(studentKeys())
+        && !b.diff(a).affectedKeys().hasAny(['id', 'name', 'grade', 'classNo', 'number', 'createdAt'])
+        && b.rp is number && b.rp >= a.rp && b.rp <= a.rp + 80
+        && b.position is map && b.position.keys().hasOnly(['ko', 'symbol', 'en'])
+        && trackOk(a.position, b.position, 'ko', 8)
+        && trackOk(a.position, b.position, 'symbol', 2)
+        && trackOk(a.position, b.position, 'en', 7)
+        && b.bestKo is number && b.bestKo >= 0 && b.bestKo <= 1500
+        && b.bestEn is number && b.bestEn >= 0 && b.bestEn <= 1500;
+    }
+
+    match /students/{sid} {
+      // 순위표를 위해 링크가 있는 학생은 전체 목록을 읽을 수 있다
+      allow read: if isMember();
+      allow create: if isTeacher()
+        && sid.matches('^[0-9]{4}$')
+        && request.resource.data.id == sid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 20;
+      allow delete: if isTeacher();
+      allow update: if isTeacher() || (isStudent(sid) && selfUpdateOk());
+    }
+
+    // ── PIN 해시: 아무도 읽을 수 없다 ──
+    // create 요청에 name 을 함께 받아 명단의 이름과 일치하는지 검사한다(저장되는 name 은 무해).
+    match /secrets/{sid} {
+      allow read, update: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['pinHash', 'name'])
+        && request.resource.data.pinHash is string
+        && request.resource.data.pinHash.size() == 64
+        && nameMatches(sid, request.resource.data.name);
+      allow delete: if isTeacher(); // PIN 초기화
+    }
+
+    // ── 익명 uid → 학번 연결 ──
+    // 첫 접속은 secrets 와 같은 배치로 만들므로 getAfter 로 PIN 해시를 확인한다
+    // (배치가 아니면 getAfter 는 get 과 같다).
+    match /links/{uid} {
+      allow read, delete: if (signedIn() && request.auth.uid == uid) || isTeacher();
+      allow update: if false;
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['sid', 'name', 'pinHash', 'at'])
+        && request.resource.data.sid is string
+        && request.resource.data.pinHash is string
+        && nameMatches(request.resource.data.sid, request.resource.data.name)
+        && existsAfter(secretPath(request.resource.data.sid))
+        && getAfter(secretPath(request.resource.data.sid)).data.pinHash == request.resource.data.pinHash;
+    }
+
+    // ── 첫 접속 실패 원인 구분용(이름이 맞고 PIN 이 이미 있으면 만들 수 있음). 만든 뒤 바로 지운다 ──
+    match /probes/{uid} {
+      allow read, update: if false;
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['sid', 'name'])
+        && request.resource.data.sid is string
+        && nameMatches(request.resource.data.sid, request.resource.data.name)
+        && exists(secretPath(request.resource.data.sid));
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    // ── 연습 기록 ──
+    match /sessions/{id} {
+      allow read: if isTeacher() || (hasLink() && resource.data.studentId == myLink().sid);
+      allow create: if hasLink()
+        && request.resource.data.studentId == myLink().sid
+        && request.resource.data.kpm is number
+        && request.resource.data.kpm >= 0 && request.resource.data.kpm <= 1500
+        && request.resource.data.accuracy is number
+        && request.resource.data.accuracy >= 0 && request.resource.data.accuracy <= 100
+        && request.resource.data.createdAt is number;
+      allow update: if false;
+      allow delete: if isTeacher();
+    }
+
+    // ── 설정·콘텐츠 ──
+    match /settings/{doc} {
+      allow read: if isMember();
+      allow write: if isTeacher();
+    }
+    match /content/{part} {
+      allow read: if isMember();
+      allow write: if isTeacher();
+    }
+
+    // ── 교사 ──
+    match /teachers/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isTeacher());
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.auth.token.email is string
+        && request.resource.data.keys().hasOnly(['email', 'owner'])
+        && request.resource.data.email == request.auth.token.email
+        && (
+          // 첫 가입자: config/owner 가 아직 없고, 같은 배치에서 나를 owner 로 만든다
+          (request.resource.data.owner == true
+            && !exists(/databases/$(database)/documents/config/owner)
+            && getAfter(/databases/$(database)/documents/config/owner).data.uid == uid)
+          ||
+          // 초대받은 사용자
+          (request.resource.data.owner == false
+            && exists(/databases/$(database)/documents/invites/$(request.auth.token.email.lower())))
+        );
+      allow update: if false;
+      allow delete: if isOwner() && resource.data.owner != true;
+    }
+
+    match /config/owner {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid
+        && getAfter(teacherPath(request.auth.uid)).data.owner == true;
+      allow update, delete: if false;
+    }
+
+    match /invites/{email} {
+      allow read: if isTeacher();
+      allow create, update: if isOwner()
+        && email == email.lower()
+        && request.resource.data.keys().hasOnly(['by', 'at']);
+      allow delete: if isOwner();
+    }
+  }
+}

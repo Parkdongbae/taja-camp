@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+교과서자료/
+content-data/
+.vercel/
+.firebase/
+*.log
+serviceAccount*.json
+.claude/
+*.tsbuildinfo

@@ -1,0 +1,67 @@
+{
+  // 타자 훈련소 Realtime Database 보안 규칙 (Firebase CLI 는 이 파일의 // 주석을 허용한다)
+  //
+  // 한계: RTDB 규칙은 Firestore(links/{uid}, teachers/{uid})를 읽을 수 없다.
+  //   그래서 "이 익명 uid 가 정말 학번 X 의 학생인가"를 여기서 검증할 수 없고,
+  //   로그인한 사용자(auth != null)라면 누구든 presence·rooms 를 쓸 수 있다.
+  //   (예: 다른 학생 이름으로 방에 들어가기, 남의 이름으로 선점하기, 방 삭제 등은 막지 못한다.)
+  //   대신 형식·값 범위와 "빈 선점 칸에만 쓰기"는 강제한다. 정원(16명)도 규칙으로는 셀 수 없다.
+  "rules": {
+    "presence": {
+      ".read": "auth != null",
+      "$sid": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['studentId', 'name', 'classNo', 'tier', 'doing', 'at']) && newData.child('studentId').val() === $sid",
+        "studentId": { ".validate": "newData.isString() && newData.val().length <= 10" },
+        "name": { ".validate": "newData.isString() && newData.val().length <= 20" },
+        "classNo": { ".validate": "newData.isNumber()" },
+        "tier": { ".validate": "newData.isNumber()" },
+        "doing": { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "at": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+    "rooms": {
+      ".read": "auth != null",
+      ".indexOn": ["tier"],
+      "$roomId": {
+        // 방 노드 전체 쓰기(입장 트랜잭션·방 삭제·오래된 방 정리)를 허용한다.
+        ".write": "auth != null",
+        // 방이 지워진 뒤 claims/players 만 남는 부분 노드가 생기지 않게 필수 필드를 요구한다.
+        ".validate": "newData.hasChildren(['id', 'tier', 'lang', 'host', 'state', 'createdAt']) && newData.child('id').val() === $roomId",
+        "id": { ".validate": "newData.isString()" },
+        "tier": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" },
+        "lang": { ".validate": "newData.val() === 'ko' || newData.val() === 'en'" },
+        "host": { ".validate": "newData.isString() && newData.val().length <= 10" },
+        "state": { ".validate": "newData.val() === 'waiting' || newData.val() === 'playing' || newData.val() === 'done'" },
+        "seed": { ".validate": "newData.isNumber()" },
+        "startAt": { ".validate": "newData.isNumber()" },
+        "durationSec": { ".validate": "newData.isNumber() && newData.val() >= 10 && newData.val() <= 600" },
+        "startCount": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 16" },
+        "createdAt": { ".validate": "newData.isNumber() && (data.exists() ? newData.val() === data.val() : newData.val() <= now + 60000)" },
+        "players": {
+          "$pid": {
+            ".validate": "newData.hasChildren(['id', 'name', 'classNo', 'joinedAt', 'online']) && newData.child('id').val() === $pid",
+            "id": { ".validate": "newData.isString() && newData.val().length <= 10" },
+            "name": { ".validate": "newData.isString() && newData.val().length <= 20" },
+            "classNo": { ".validate": "newData.isNumber()" },
+            "joinedAt": { ".validate": "newData.isNumber()" },
+            "online": { ".validate": "newData.isBoolean()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "claims": {
+          "$index": {
+            // 비어 있는 칸에만 새로 쓸 수 있다(경기 중일 때만, 참가자만). 이미 있는 선점은 바꿀 수 없다.
+            // (.validate 는 삭제에는 적용되지 않으므로 방 전체 삭제는 가능)
+            ".validate": "$index.matches(/^[0-9]+$/) && newData.hasChildren(['by', 'at']) && ((!data.exists() && newData.parent().parent().child('state').val() === 'playing' && newData.parent().parent().child('players').child(newData.child('by').val()).exists() && newData.child('at').val() <= now) || (data.child('by').val() === newData.child('by').val() && data.child('at').val() === newData.child('at').val()))",
+            "by": { ".validate": "newData.isString()" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}
