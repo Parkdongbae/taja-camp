@@ -60,6 +60,15 @@
             "$other": { ".validate": false }
           }
         },
+        "freezes": {
+          "$pid": {
+            // 멈추기: 경기 중, 참가자 본인 칸이 비어 있을 때 한 번만. 이미 있는 값은 바꿀 수 없다.
+            ".validate": "newData.hasChildren(['at', 'ms']) && ((!data.exists() && newData.parent().parent().child('state').val() === 'playing' && newData.parent().parent().child('players').child($pid).exists() && newData.child('at').val() <= now) || (data.child('at').val() === newData.child('at').val() && data.child('ms').val() === newData.child('ms').val()))",
+            "at": { ".validate": "newData.isNumber()" },
+            "ms": { ".validate": "newData.isNumber() && newData.val() >= 1000 && newData.val() <= 60000" },
+            "$other": { ".validate": false }
+          }
+        },
         "$other": { ".validate": false }
       }
     }

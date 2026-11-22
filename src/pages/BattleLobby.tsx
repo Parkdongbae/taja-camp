@@ -285,6 +285,16 @@ export default function BattleLobby() {
                 </li>
                 <li>· 같은 낱말은 먼저 친 사람이 득점</li>
                 <li>· Space 나 Enter 로 제출, 틀리면 0.5초 멈춤</li>
+                {!!settings.freezePhrase && (
+                  <li>
+                    · <span className="text-sky-300">멈추기</span>: 선생님이 알려 준 문장을 치면 {settings.freezeSeconds ?? 5}초 동안 나만 칠 수 있어요(한 판에 한 번)
+                  </li>
+                )}
+                {settings.badWordBlock !== false && (
+                  <li>
+                    · <span className="text-miss">욕설을 치면</span> {settings.badWordSeconds ?? 10}초 동안 입력 금지
+                  </li>
+                )}
               </ul>
             </div>
           </div>

@@ -144,6 +144,7 @@ export default function BattleGame() {
       now: () => backend.serverNow(),
       claim: (index) => backend.claimWord(roomId, index, meId),
       finish: () => void backend.finishRoom(roomId),
+      freeze: (ms) => backend.freezeRoom(roomId, meId, ms),
     }),
     [roomId, meId],
   );

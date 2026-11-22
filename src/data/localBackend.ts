@@ -703,6 +703,21 @@ export function createLocalBackend(): Backend {
       }
     },
 
+    async freezeRoom(roomId, playerId, ms) {
+      try {
+        return await roomLock((rs) => {
+          const r = rs[roomId];
+          if (!r || r.state !== 'playing' || !r.players?.[playerId]) return false;
+          r.freezes = r.freezes ?? {};
+          if (r.freezes[playerId]) return false;
+          r.freezes[playerId] = { at: Date.now(), ms };
+          return true;
+        });
+      } catch {
+        return false;
+      }
+    },
+
     async finishRoom(roomId) {
       await roomLock((rs) => {
         const r = rs[roomId];

@@ -149,6 +149,15 @@ export interface Settings {
   rankingPublic: boolean;
   soundAllowed: boolean;
   exam: ExamConfig;
+  // ── 배틀 멈추기·바른 말 (옛 문서에는 없을 수 있다) ──
+  /** 멈추기 문장. 배틀에서 이 문장을 친 학생만 freezeSeconds 동안 입력할 수 있다. 비우면 끔 */
+  freezePhrase?: string;
+  freezeSeconds?: number;
+  /** 배틀에서 욕설을 치면 badWordSeconds 동안 그 학생의 입력을 막는다 */
+  badWordBlock?: boolean;
+  badWordSeconds?: number;
+  /** 선생님이 추가한 욕설 */
+  badWordsExtra?: string[];
 }
 export const DEFAULT_SETTINGS: Settings = {
   battleEnabled: true,
@@ -159,6 +168,11 @@ export const DEFAULT_SETTINGS: Settings = {
   rankingPublic: true,
   soundAllowed: true,
   exam: DEFAULT_EXAM,
+  freezePhrase: '',
+  freezeSeconds: 5,
+  badWordBlock: true,
+  badWordSeconds: 10,
+  badWordsExtra: [],
 };
 
 // ───────── 인증 ─────────
@@ -216,6 +230,8 @@ export interface BattleRoom {
   players: Record<string, BattlePlayer>;
   /** 낱말 번호 → 선점한 사람 */
   claims: Record<string, { by: string; at: number }>;
+  /** 멈추기: 쓴 사람 학번 → 시작 시각(서버 ms)·길이(ms). 한 판에 한 사람 한 번 */
+  freezes?: Record<string, { at: number; ms: number }>;
 }
 export const BATTLE_MAX_PLAYERS = 16;
 export const BATTLE_DURATION_SEC = 120;

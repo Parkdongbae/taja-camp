@@ -74,4 +74,6 @@ export interface Backend {
   claimWord(roomId: string, wordIndex: number, playerId: string): Promise<boolean>;
   /** 경기 종료 표시(누가 호출해도 됨, 여러 번 호출 안전). */
   finishRoom(roomId: string): Promise<void>;
+  /** 멈추기 발동(한 판에 한 사람 한 번). 내 칸이 비어 있어 새로 썼으면 true. */
+  freezeRoom(roomId: string, playerId: string, ms: number): Promise<boolean>;
 }

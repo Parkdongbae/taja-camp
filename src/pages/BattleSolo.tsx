@@ -84,10 +84,11 @@ function SoloMatch({ lang, student, onAgain, onExit }: { lang: Lang; student: St
   const [runner] = useState(() => createBotRunner(schedule, setup.bots, (setup.room.seed ^ 0x5bd1e995) >>> 0, durMs));
   const [room, setRoom] = useState<BattleRoom>(setup.room);
   const claimsRef = useRef<BattleRoom['claims']>({});
+  const freezesRef = useRef<NonNullable<BattleRoom['freezes']>>({});
   const startAt = setup.room.startAt;
 
   const publish = useCallback((done?: boolean) => {
-    setRoom((r) => ({ ...r, claims: { ...claimsRef.current }, ...(done ? { state: 'done' as const } : {}) }));
+    setRoom((r) => ({ ...r, claims: { ...claimsRef.current }, freezes: { ...freezesRef.current }, ...(done ? { state: 'done' as const } : {}) }));
   }, []);
 
   const advance = useCallback(
@@ -122,8 +123,18 @@ function SoloMatch({ lang, student, onAgain, onExit }: { lang: Lang; student: St
       onFrame: (t) => {
         if (advance(t)) publish();
       },
+      // 멈추기: 봇들이 ms 동안 쉰다(한 판에 한 번)
+      freeze: async (ms) => {
+        if (freezesRef.current[meId]) return false;
+        const now = performance.now();
+        advance(now - startAt);
+        runner.freeze(now - startAt + ms);
+        freezesRef.current[meId] = { at: now, ms };
+        publish();
+        return true;
+      },
     }),
-    [advance, publish, startAt, durMs, meId],
+    [advance, publish, runner, startAt, durMs, meId],
   );
 
   const settle = useCallback(

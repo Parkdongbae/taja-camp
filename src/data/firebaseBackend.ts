@@ -161,6 +161,7 @@ function toRoom(id: string, v: unknown): BattleRoom | null {
     createdAt: Number(r.createdAt) || 0,
     players: objOf<BattlePlayer>(r.players),
     claims: objOf<{ by: string; at: number }>(r.claims),
+    freezes: objOf<{ at: number; ms: number }>(r.freezes),
   };
 }
 
@@ -1060,6 +1061,20 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
           return; // 이미 선점됨 → 중단
         });
         return res.snapshot.child('by').val() === playerId;
+      } catch {
+        return false;
+      }
+    },
+
+    async freezeRoom(roomId, playerId, ms) {
+      try {
+        const fb = await ready;
+        const { D, db } = fb;
+        const res = await D.runTransaction(D.ref(db, `rooms/${roomId}/freezes/${playerId}`), (cur) => {
+          if (cur === null) return { at: D.serverTimestamp(), ms };
+          return; // 이미 씀 → 중단
+        });
+        return res.committed;
       } catch {
         return false;
       }

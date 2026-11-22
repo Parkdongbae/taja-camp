@@ -3,6 +3,9 @@
 //     친구 배틀은 서버(serverNow·claimWord·finishRoom), 컴퓨터 대결은 로컬 상태로 구현해 넘긴다.
 // - startAt 전 5초 카운트다운 → durationSec 동안 경기 → 시간이 다 되면 driver.finish()(상태가 그대로면 3초마다 다시).
 // - 낱말 DOM 은 React 밖에서 만들고 requestAnimationFrame 으로 transform 만 바꾼다(리렌더 최소화).
+// - 멈추기: 선생님이 정한 문장(settings.freezePhrase)을 치면 driver.freeze(ms) → room.freezes 에 기록,
+//   그동안 다른 참가자는 입력할 수 없다(한 판에 한 사람 한 번).
+// - 욕설: 화면에 없는 말을 냈는데 욕설이면 경고 창 + settings.badWordSeconds 동안 내 입력만 막는다.
 // - claims 에 들어온 낱말은 숨기고, 그 자리에 선점자 이름표 + 터지는 효과(0.6초). 내가 얻으면 +점수.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BattleRoom } from '../../data/types';
@@ -11,7 +14,10 @@ import { normalizeText } from '../../engine/hangul';
 import { rankPlayers } from '../../engine/scoring';
 import { BattleInput, type SubmitResult } from './BattleInput';
 import { LANG_LABEL } from './battleUtil';
-import { playCombo, playEnd, playError, playLate, playScore, playStart, playTick, playWarn } from '../sound';
+import { playAlarm, playCombo, playEnd, playError, playFreeze, playLate, playScore, playStart, playTick, playWarn } from '../sound';
+import { findBadWord } from '../../engine/badwords';
+import { activeFreeze, phraseKey, samePhrase } from '../../engine/freeze';
+import { useAuth } from '../../state/auth';
 
 const WORD_BASE =
   'absolute left-0 top-0 whitespace-nowrap rounded-lg px-2 py-0.5 text-2xl font-bold will-change-transform select-none transition-opacity';
@@ -40,7 +46,12 @@ export interface BattleDriver {
   finish(): void;
   /** 매 프레임(경기 시작 기준 경과 ms) — 컴퓨터 대결의 봇 진행용 */
   onFrame?(elapsedMs: number): void;
+  /** 멈추기 발동(ms 동안). 이번 판에 처음 써서 걸렸으면 true */
+  freeze?(ms: number): Promise<boolean>;
 }
+
+const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(Number(n) || 0)));
+const penaltyKey = (roomId: string) => `taja.battle.penalty.${roomId}`;
 
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
@@ -57,12 +68,28 @@ export function BattlePlay({
   driver: BattleDriver;
   title?: string;
 }) {
+  const settings = useAuth((s) => s.settings);
   const roomRef = useRef(room);
   const driverRef = useRef(driver);
+  const setRef = useRef(settings);
   useLayoutEffect(() => {
     roomRef.current = room;
     driverRef.current = driver;
-  }, [room, driver]);
+    setRef.current = settings;
+  }, [room, driver, settings]);
+
+  // 멈추기(누가·남은 초)와 욕설 제재(남은 초). 제재 끝 시각은 새로 고침해도 남게 sessionStorage 에 둔다.
+  const [freezeBy, setFreezeBy] = useState('');
+  const [freezeLeft, setFreezeLeft] = useState(0);
+  const [penaltyLeft, setPenaltyLeft] = useState(0);
+  const penaltyUntil = useRef(0);
+  useEffect(() => {
+    try {
+      penaltyUntil.current = Number(sessionStorage.getItem(penaltyKey(room.id))) || 0;
+    } catch {
+      penaltyUntil.current = 0;
+    }
+  }, [room.id]);
 
   const layerRef = useRef<HTMLDivElement>(null);
   const pendingRef = useRef(new Set<number>()); // 내가 제출해 선점 중(또는 선점 성공)인 낱말
@@ -130,6 +157,12 @@ export function BattlePlay({
 
       setCountdown(t < 0 ? Math.ceil(-t / 1000) : 0);
       setRemain(Math.max(0, Math.ceil((durMs - Math.max(0, t)) / 1000)));
+
+      const nowT = r.startAt + t;
+      const af = t >= 0 && t < durMs ? activeFreeze(r.freezes, nowT) : null;
+      setFreezeBy(af ? af.by : '');
+      setFreezeLeft(af ? Math.ceil((af.until - nowT) / 1000) : 0);
+      setPenaltyLeft(t < durMs ? Math.max(0, Math.ceil((penaltyUntil.current - Date.now()) / 1000)) : 0);
 
       if (t >= durMs) {
         clearWords();
@@ -202,11 +235,33 @@ export function BattlePlay({
       const r = roomRef.current;
       const t = driverRef.current.now() - r.startAt;
       if (r.state !== 'playing' || t < 0 || t >= durMs) return { kind: 'none' };
+      const st = setRef.current;
+      // 멈추기 문장
+      if (samePhrase(typed, st.freezePhrase)) {
+        if (r.freezes?.[meId]) return { kind: 'info', text: '멈추기는 한 판에 한 번만 쓸 수 있어요' };
+        if (activeFreeze(r.freezes, r.startAt + t)) return { kind: 'info', text: '지금은 멈추기를 쓸 수 없어요' };
+        const ok = !!driverRef.current.freeze && (await driverRef.current.freeze(clamp(st.freezeSeconds ?? 5, 1, 30) * 1000));
+        if (ok) playFreeze();
+        return { kind: 'info', text: ok ? '⛄ 멈추기 발동!' : '멈추기를 쓰지 못했어요' };
+      }
       const taken = new Set<number>(pendingRef.current);
       for (const k of Object.keys(r.claims ?? {})) taken.add(Number(k));
       const w = matchSubmission(schedule, t, typed, taken);
       if (!w) {
         streak.current = 0;
+        // 욕설이면 경고 + 입력 금지
+        if (st.badWordBlock !== false && findBadWord(typed, st.badWordsExtra)) {
+          const sec = clamp(st.badWordSeconds ?? 10, 1, 120);
+          penaltyUntil.current = Date.now() + sec * 1000;
+          try {
+            sessionStorage.setItem(penaltyKey(r.id), String(penaltyUntil.current));
+          } catch {
+            // 무시
+          }
+          setPenaltyLeft(sec);
+          playAlarm();
+          return { kind: 'none' };
+        }
         playError();
         return { kind: 'miss' };
       }
@@ -238,6 +293,7 @@ export function BattlePlay({
       const claims = r.claims ?? {};
       const vis = visibleWords(schedule, t).filter((w) => !claims[String(w.index)] && !pendingRef.current.has(w.index));
       if (vis.some((w) => w.text === s)) return false;
+      if (phraseKey(setRef.current.freezePhrase ?? '').startsWith(s + ' ')) return true; // 멈추기 문장을 치는 중
       return vis.some((w) => w.text.startsWith(s + ' '));
     },
     [schedule],
@@ -254,6 +310,13 @@ export function BattlePlay({
   const mine = ranks.find((r) => r.id === meId);
   const last = !ended && countdown === 0 && remain <= LAST_SEC;
   const active = !ended && countdown === 0;
+  const frozen = active && !!freezeBy && freezeBy !== meId; // 남이 건 멈추기
+  const punished = active && penaltyLeft > 0;
+  const canType = active && !frozen && !punished;
+  const freezerName = room.players?.[freezeBy]?.name ?? freezeBy;
+  useEffect(() => {
+    if (frozen) playFreeze();
+  }, [frozen]);
 
   // ── 효과음: 카운트다운·시작·마지막 20초·마지막 5초·종료 (값이 바뀌는 순간에만) ──
   const snd = useRef({ countdown, remain, last, ended });
@@ -297,6 +360,32 @@ export function BattlePlay({
               <div className="anim-pop text-6xl font-black">경기 종료!</div>
             </div>
           )}
+          {frozen && !punished && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-sky-950/70 text-center backdrop-blur-[2px]">
+              <div className="text-7xl">⛄</div>
+              <div className="mt-2 text-5xl font-black text-sky-200">멈춤!</div>
+              <div className="mt-3 text-xl font-bold">{freezerName} 님이 멈추기를 썼어요</div>
+              <div className="mt-1 text-lg text-white/80">
+                <b className="text-3xl tabular-nums text-gold">{freezeLeft}</b>초 뒤에 다시 칠 수 있어요
+              </div>
+            </div>
+          )}
+          {active && freezeBy === meId && !punished && (
+            <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full bg-sky-400 px-5 py-1.5 text-lg font-black text-ink">
+              ⛄ 멈추기 발동! {freezeLeft}초 동안 나만 칠 수 있어요
+            </div>
+          )}
+          {punished && (
+            <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center bg-miss/95 p-6 text-center">
+              <div className="text-7xl">🚫</div>
+              <div className="mt-2 text-5xl font-black">욕설·비속어 금지!</div>
+              <div className="mt-4 text-xl font-bold">배틀에서 욕설이나 나쁜 말은 절대 쓸 수 없습니다.</div>
+              <div className="mt-1 text-lg">친구를 존중하는 바르고 고운 말만 써 주세요.</div>
+              <div className="mt-5 rounded-2xl bg-black/30 px-6 py-3 text-lg">
+                <b className="text-4xl tabular-nums text-gold">{penaltyLeft}</b>초 동안 입력할 수 없습니다
+              </div>
+            </div>
+          )}
           {combo && (
             <div key={combo.id} className="anim-pop pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 rounded-full bg-gold px-5 py-1.5 text-lg font-black text-ink">
               연속 획득! ×{combo.n}
@@ -305,7 +394,12 @@ export function BattlePlay({
           <div className="pointer-events-none absolute bottom-1 right-3 text-xs text-white/25">바닥</div>
         </div>
 
-        <BattleInput active={active} onSubmit={onSubmit} spaceContinues={spaceContinues} />
+        <BattleInput
+          active={canType}
+          onSubmit={onSubmit}
+          spaceContinues={spaceContinues}
+          blockedText={punished ? `🚫 욕설 금지 · ${penaltyLeft}초 동안 입력할 수 없어요` : frozen ? `⛄ 멈춤 · ${freezeLeft}초 뒤에 칠 수 있어요` : undefined}
+        />
       </div>
 
       <aside className="flex w-72 shrink-0 flex-col bg-black/20 p-4">

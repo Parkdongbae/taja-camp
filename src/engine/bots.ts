@@ -12,7 +12,7 @@
 //   nextSoloLevel(level: number, place: number): number   1등 +1 / 2등 유지 / 3등 이하 −1 (−5~10)
 //   applySolo(solo: Student['solo'], place: number): { level; wins; games }
 //   interface BotClaim { index: number; botId: string; at: number(ms, 경기 시작 기준) }
-//   createBotRunner(schedule, bots, seed, durationMs = Infinity): { step(elapsedMs, claimed: Set<number> | Record<string, unknown>): BotClaim[] }
+//   createBotRunner(schedule, bots, seed, durationMs = Infinity): { step(elapsedMs, claimed: Set<number> | Record<string, unknown>): BotClaim[]; freeze(untilMs): void(멈추기) }
 //       실시간 스텝 방식. step 은 elapsedMs 까지의 봇 사건을 시간순으로 처리하고 새로 가져간 낱말을 돌려준다.
 //       - 봇은 한 번에 낱말 하나: 화면에 있는 미선점 낱말을 고르고(점수 높은 것 선호 + 무작위),
 //         반응 400~900ms + 타수 ÷ (kpm/60) 초 × 흔들림 0.85~1.25 (+7% 확률 오타 600ms) 뒤에 완성.
@@ -195,7 +195,16 @@ export function createBotRunner(schedule: FallingWord[], bots: Bot[], seed: numb
     return out;
   }
 
-  return { step };
+  /** 멈추기: 모든 봇이 하던 낱말을 놓고 untilMs(경과 ms)까지 쉰다. step(지금) 뒤에 부른다. */
+  function freeze(untilMs: number) {
+    for (const s of states) {
+      s.target = null;
+      s.fails = false;
+      s.freeAt = Math.max(untilMs, clock);
+    }
+  }
+
+  return { step, freeze };
 }
 
 export function planBotClaims(schedule: FallingWord[], bots: Bot[], seed: number, durationMs = Infinity): BotClaim[] {
