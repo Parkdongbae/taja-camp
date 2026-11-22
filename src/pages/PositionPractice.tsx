@@ -91,7 +91,10 @@ export default function PositionPractice() {
 
   const kindParam = params.get('kind');
   const drillDone = student?.stageDrill[stageId] ?? 0;
-  const kind: Kind = kindParam === 'learn' || kindParam === 'mix' || kindParam === 'review' ? kindParam : drillDone >= 1 ? 'mix' : 'learn';
+  // 주소에 kind 가 없을 때의 기본값은 들어올 때 한 번만 정한다(연습을 마쳐 stageDrill 이 바뀌어도 제목이 바뀌지 않게).
+  const [defaultKind, setDefaultKind] = useState<{ stageId: string; kind: Kind }>(() => ({ stageId, kind: drillDone >= 1 ? 'mix' : 'learn' }));
+  if (defaultKind.stageId !== stageId) setDefaultKind({ stageId, kind: drillDone >= 1 ? 'mix' : 'learn' });
+  const kind: Kind = kindParam === 'learn' || kindParam === 'mix' || kindParam === 'review' ? kindParam : defaultKind.kind;
 
   // 복습 글쇠: 넘겨받은 것 → 내 약점 글쇠(이 단계까지의 글쇠 중)
   const focusCodes = useMemo(() => {
