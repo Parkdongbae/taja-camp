@@ -12,6 +12,7 @@ import { useAuth } from '../../state/auth';
 import type { BattleFinish } from '../../state/record';
 import { TierBadge } from '../TierBadge';
 import { Btn, Kbd, Modal } from '../ui';
+import { playDone, playFanfare } from '../sound';
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 const SETTLE_MS = 800; // 끝 무렵 선점이 다 도착하도록 잠시 기다린 뒤 정산
@@ -104,6 +105,16 @@ export function BattleResult({
       window.clearTimeout(timer);
     };
   }, [settleKey, meId]);
+
+  // 결과가 처음 나올 때 한 번: 1등이면 팡파르, 아니면 맑은 "딩"
+  const fresh = reward?.kind === 'fresh';
+  const placeRef = useRef(mine?.place);
+  placeRef.current = mine?.place;
+  useEffect(() => {
+    if (!fresh) return;
+    if (placeRef.current === 1) playFanfare();
+    else playDone();
+  }, [fresh]);
 
   const res = reward && (reward.kind === 'fresh' || reward.kind === 'stored') ? reward.res : null;
   const promoted = !!res && reward?.kind === 'fresh' && res.tierAfter > res.tierBefore && !promoClosed;

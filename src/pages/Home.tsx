@@ -183,7 +183,7 @@ export default function Home() {
               disabled={!settings.soundAllowed}
               onChange={(e) => prefs.set({ sound: e.target.checked })}
             />
-            타건음 켜기 {settings.soundAllowed ? '(이어폰을 쓸 때만)' : '(선생님이 꺼 두었어요)'}
+            소리 켜기 · 타건음과 배틀 효과음 {settings.soundAllowed ? '(이어폰을 쓸 때만)' : '(선생님이 꺼 두었어요)'}
           </label>
         </Card>
       </div>

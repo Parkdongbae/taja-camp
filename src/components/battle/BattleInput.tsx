@@ -4,6 +4,7 @@
 //   - Enter: keydown 에서 처리. 조합 중(isComposing/229)이면 compositionend 뒤 값으로 제출.
 //   - miss 면 흔들림 + 0.5초 입력 잠금.
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { playKey } from '../sound';
 
 export type SubmitResult = { kind: 'ok'; points: number } | { kind: 'late' } | { kind: 'miss' } | { kind: 'none' };
 
@@ -128,6 +129,7 @@ export const BattleInput = memo(function BattleInput({
           const v = e.target.value;
           if (readOnly) return;
           if (!v.endsWith(' ')) {
+            if (v.length > value.length) playKey();
             setValue(v);
             return;
           }

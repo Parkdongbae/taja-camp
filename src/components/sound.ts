@@ -5,6 +5,8 @@
 //   playError()    오타: 낮고 짧은 "툭"
 //   playDone()     낱말·문장 완성: 맑은 "딩"
 //   playFanfare()  승급·진급·결과 창: 2초 이내 팡파르
+//   배틀: playTick(high?) 카운트다운 "삑" · playStart() 시작 · playScore(1|2|4) 낱말 획득 · playCombo(n) 연속 획득
+//         playLate() 한발 늦음 · playWarn() 마지막 20초 · playEnd() 경기 종료
 //   soundEnabled() 지금 소리를 내도 되는가 (usePrefs.sound 와 useAuth.settings.soundAllowed)
 // 소리가 꺼져 있거나 Web Audio 를 쓸 수 없으면 아무것도 하지 않는다. 음량은 usePrefs.volume, 테마는 usePrefs.soundTheme.
 import { usePrefs, type SoundTheme } from '../state/prefs';
@@ -134,4 +136,67 @@ export function playFanfare(): void {
     tone(r, 'triangle', f, f, last ? 0.7 : 0.18, 0.3, i * 0.14);
     if (last) tone(r, 'sine', f * 1.5, f * 1.5, 0.7, 0.12, i * 0.14);
   });
+}
+
+// ───────── 배틀 효과음 ─────────
+
+/** 카운트다운 한 칸. high 면 마지막 5초용 높은 음. */
+export function playTick(high = false): void {
+  const r = ready();
+  if (!r) return;
+  tone(r, 'square', high ? 1320 : 660, high ? 1320 : 660, 0.09, 0.14);
+}
+
+/** 경기 시작: 위로 올라가는 두 음. */
+export function playStart(): void {
+  const r = ready();
+  if (!r) return;
+  tone(r, 'triangle', 660, 660, 0.12, 0.3);
+  tone(r, 'triangle', 1320, 1320, 0.45, 0.32, 0.12);
+  tone(r, 'sine', 1980, 1980, 0.4, 0.1, 0.12);
+}
+
+/** 낱말 획득: 점수가 클수록 높고 화려하게. */
+export function playScore(points: number): void {
+  const r = ready();
+  if (!r) return;
+  if (points >= 4) {
+    [1046.5, 1318.5, 1568, 2093].forEach((f, i) => tone(r, 'triangle', f, f, i === 3 ? 0.3 : 0.1, 0.26, i * 0.055));
+  } else if (points >= 2) {
+    tone(r, 'triangle', 880, 880, 0.09, 0.26);
+    tone(r, 'triangle', 1318.5, 1318.5, 0.2, 0.26, 0.07);
+  } else {
+    tone(r, 'triangle', 880, 990, 0.14, 0.24);
+  }
+}
+
+/** 연속 획득(3번째부터): 이어질수록 한 음씩 올라간다. */
+export function playCombo(n: number): void {
+  const r = ready();
+  if (!r) return;
+  const f = 1568 * Math.pow(2, Math.min(7, Math.max(0, n - 3)) / 12);
+  tone(r, 'sine', f, f * 1.5, 0.22, 0.2, 0.18);
+}
+
+/** 한발 늦음: 아래로 떨어지는 부드러운 음. */
+export function playLate(): void {
+  const r = ready();
+  if (!r) return;
+  tone(r, 'sine', 520, 300, 0.22, 0.3);
+}
+
+/** 마지막 20초 알림: 같은 음 두 번. */
+export function playWarn(): void {
+  const r = ready();
+  if (!r) return;
+  tone(r, 'square', 880, 880, 0.12, 0.14);
+  tone(r, 'square', 880, 880, 0.12, 0.14, 0.18);
+}
+
+/** 경기 종료: 길게 내려가는 호루라기 느낌. */
+export function playEnd(): void {
+  const r = ready();
+  if (!r) return;
+  tone(r, 'triangle', 1568, 1568, 0.18, 0.3);
+  tone(r, 'triangle', 1568, 784, 0.7, 0.3, 0.2);
 }

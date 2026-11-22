@@ -11,6 +11,7 @@ import { normalizeText } from '../../engine/hangul';
 import { rankPlayers } from '../../engine/scoring';
 import { BattleInput, type SubmitResult } from './BattleInput';
 import { LANG_LABEL } from './battleUtil';
+import { playCombo, playEnd, playError, playLate, playScore, playStart, playTick, playWarn } from '../sound';
 
 const WORD_BASE =
   'absolute left-0 top-0 whitespace-nowrap rounded-lg px-2 py-0.5 text-2xl font-bold will-change-transform select-none transition-opacity';
@@ -206,6 +207,7 @@ export function BattlePlay({
       const w = matchSubmission(schedule, t, typed, taken);
       if (!w) {
         streak.current = 0;
+        playError();
         return { kind: 'miss' };
       }
       pendingRef.current.add(w.index);
@@ -213,10 +215,15 @@ export function BattlePlay({
       if (!ok) {
         pendingRef.current.delete(w.index);
         streak.current = 0;
+        playLate();
         return { kind: 'late' };
       }
       streak.current += 1;
-      if (streak.current >= 3) setCombo({ n: streak.current, id: Date.now() });
+      playScore(w.points);
+      if (streak.current >= 3) {
+        setCombo({ n: streak.current, id: Date.now() });
+        playCombo(streak.current);
+      }
       return { kind: 'ok', points: w.points };
     },
     [schedule, durMs, meId],
@@ -247,6 +254,20 @@ export function BattlePlay({
   const mine = ranks.find((r) => r.id === meId);
   const last = !ended && countdown === 0 && remain <= LAST_SEC;
   const active = !ended && countdown === 0;
+
+  // ── 효과음: 카운트다운·시작·마지막 20초·마지막 5초·종료 (값이 바뀌는 순간에만) ──
+  const snd = useRef({ countdown, remain, last, ended });
+  useEffect(() => {
+    const p = snd.current;
+    if (countdown !== p.countdown) {
+      if (countdown > 0) playTick();
+      else if (!ended) playStart();
+    }
+    if (last && !p.last) playWarn();
+    if (active && remain !== p.remain && remain > 0 && remain <= 5) playTick(true);
+    if (ended && !p.ended) playEnd();
+    snd.current = { countdown, remain, last, ended };
+  }, [countdown, remain, last, ended, active]);
 
   return (
     <div className="flex h-full bg-ink text-white">

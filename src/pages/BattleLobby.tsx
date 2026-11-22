@@ -5,6 +5,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { backend } from '../data';
 import { AppError, BATTLE_DURATION_SEC, BATTLE_MAX_PLAYERS, type BattleRoom, type Lang } from '../data/types';
 import { useAuth } from '../state/auth';
+import { usePrefs } from '../state/prefs';
+import { playScore } from '../components/sound';
 import { getStage, isBattleUnlocked, isEnBattleUnlocked, nextStageId } from '../engine/stages';
 import { tierProgress } from '../engine/scoring';
 import { TierBadge } from '../components/TierBadge';
@@ -16,6 +18,8 @@ export default function BattleLobby() {
   const loc = useLocation();
   const { student, settings } = useAuth();
   const navState = (loc.state ?? null) as LobbyState | null;
+  const sound = usePrefs((s) => s.sound);
+  const setPrefs = usePrefs((s) => s.set);
 
   // 임시 공개(선생님 설정)면 자리 단계와 상관없이 연다
   const openAll = !!settings.battleOpenAll;
@@ -285,6 +289,20 @@ export default function BattleLobby() {
             </div>
           </div>
         </div>
+
+        <label className="flex cursor-pointer items-center justify-center gap-2 text-sm text-white/70">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-mint-500"
+            checked={sound && settings.soundAllowed}
+            disabled={!settings.soundAllowed}
+            onChange={(e) => {
+              setPrefs({ sound: e.target.checked });
+              if (e.target.checked) window.setTimeout(() => playScore(2), 0); // 켜면 바로 들려준다
+            }}
+          />
+          🔊 효과음 켜기 {settings.soundAllowed ? '(이어폰을 쓸 때만)' : '(선생님이 꺼 두었어요)'}
+        </label>
 
         <div className="text-center text-xs text-white/40">
           <Kbd>Enter</Kbd> 친구와 배틀 · <Kbd>C</Kbd> 컴퓨터와 대결 · <Kbd>Esc</Kbd> 홈{enUnlocked ? ' · ← → 한국어/ENG' : ''}

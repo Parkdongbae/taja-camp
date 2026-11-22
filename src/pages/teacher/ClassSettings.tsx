@@ -124,8 +124,8 @@ export default function ClassSettings() {
         <Row title="순위표 공개" desc="끄면 학생은 자기 기록만 볼 수 있어요.">
           <Toggle label="순위표 공개" on={s.rankingPublic} onChange={(v) => void save({ rankingPublic: v })} />
         </Row>
-        <Row title="타건음 허용" desc="끄면 학생이 소리를 켤 수 없어요.">
-          <Toggle label="타건음 허용" on={s.soundAllowed} onChange={(v) => void save({ soundAllowed: v })} />
+        <Row title="소리 허용" desc="타건음과 배틀 효과음. 끄면 학생이 소리를 켤 수 없어요.">
+          <Toggle label="소리 허용" on={s.soundAllowed} onChange={(v) => void save({ soundAllowed: v })} />
         </Row>
       </Card>
     </div>
