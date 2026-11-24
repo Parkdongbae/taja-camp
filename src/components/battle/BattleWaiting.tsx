@@ -1,7 +1,8 @@
-// 배틀 대기실. <BattleWaiting room meId onStart onLeave starting error />
-// 방장만 [시작 Enter](2명 이상), [나가기 Esc].
+// 배틀 대기실. <BattleWaiting room meId onStart onLeave onDuration? starting error />
+// 방장만 [시작 Enter](2명 이상), [나가기 Esc]. 방장은 경기 시간을 고른다(←/→ 또는 버튼, 기본 2분).
 import { useEffect } from 'react';
-import { BATTLE_DURATION_SEC, BATTLE_MAX_PLAYERS, type BattleRoom } from '../../data/types';
+import { BATTLE_MAX_PLAYERS, type BattleRoom } from '../../data/types';
+import { BATTLE_DURATIONS } from '../../engine/battle';
 import { tierName } from '../../engine/scoring';
 import { TierBadge } from '../TierBadge';
 import { Btn, Kbd } from '../ui';
@@ -12,9 +13,11 @@ export function BattleWaiting({
   meId,
   onStart,
   onLeave,
+  onDuration,
   starting,
   error,
 }: {
+  onDuration?: (sec: number) => void;
   room: BattleRoom;
   meId: string;
   onStart: () => void;
@@ -26,6 +29,7 @@ export function BattleWaiting({
   const isHost = room.host === meId;
   const canStart = isHost && players.length >= 2 && !starting;
   const hostName = room.players?.[room.host]?.name ?? '';
+  const durLabel = (sec: number) => (sec % 60 === 0 ? `${sec / 60}분` : `${Math.floor(sec / 60)}분 ${sec % 60}초`);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -37,11 +41,18 @@ export function BattleWaiting({
       } else if (e.key === 'Escape') {
         e.preventDefault();
         onLeave();
+      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && isHost && onDuration) {
+        // 방장: 경기 시간 바꾸기
+        e.preventDefault();
+        const list = BATTLE_DURATIONS as readonly number[];
+        const i = Math.max(0, list.indexOf(room.durationSec));
+        const j = Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowRight' ? 1 : -1)));
+        if (list[j] !== room.durationSec) onDuration(list[j]);
       }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [canStart, onStart, onLeave]);
+  }, [canStart, onStart, onLeave, isHost, onDuration, room.durationSec]);
 
   return (
     <div className="h-full bg-ink text-white">
@@ -90,7 +101,33 @@ export function BattleWaiting({
         <div className="flex items-center justify-between rounded-2xl bg-white/5 px-6 py-4 ring-1 ring-white/10">
           <div className="text-sm text-white/70">
             <div>
-              방장: <b className="text-white">{hostName}</b> · {tierName(room.tier)} 방 · {BATTLE_DURATION_SEC}초 경기
+              방장: <b className="text-white">{hostName}</b> · {tierName(room.tier)} 방 · <b className="text-gold">{durLabel(room.durationSec)}</b> 경기
+            </div>
+            <div className="mt-2 flex items-center gap-1.5">
+              <span className="mr-1 text-white/50">경기 시간</span>
+              {BATTLE_DURATIONS.map((sec) => {
+                const on = sec === room.durationSec;
+                return isHost && onDuration ? (
+                  <button
+                    key={sec}
+                    type="button"
+                    onClick={() => onDuration(sec)}
+                    aria-pressed={on}
+                    className={`rounded-full px-3 py-1 text-xs font-bold transition ${on ? 'bg-gold text-ink' : 'bg-white/10 text-white/70 hover:bg-white/20'}`}
+                  >
+                    {durLabel(sec)}
+                  </button>
+                ) : (
+                  <span key={sec} className={`rounded-full px-3 py-1 text-xs font-bold ${on ? 'bg-gold text-ink' : 'bg-white/5 text-white/30'}`}>
+                    {durLabel(sec)}
+                  </span>
+                );
+              })}
+              {isHost && onDuration && (
+                <span className="ml-1 text-xs text-white/40">
+                  <Kbd>←</Kbd> <Kbd>→</Kbd> 로 바꾸기
+                </span>
+              )}
             </div>
             <div className="mt-1 text-white/50">
               {isHost

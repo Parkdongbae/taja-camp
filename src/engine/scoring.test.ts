@@ -142,6 +142,28 @@ describe('rankPlayers', () => {
     expect(r.map((x) => x.id)).toEqual(['b', 'a', 'c']);
     expect(r[1].place).toBe(2);
   });
+  it('보너스가 붙은 낱말은 score 로 센다', () => {
+    const r = rankPlayers(room({ '0': { by: 'a', at: 10 } }), [{ index: 0, points: 2, score: 5 }]);
+    expect(r[0]).toMatchObject({ id: 'a', score: 5, words: 1 });
+  });
+  it('파워: 그 시점 다른 사람 점수의 절반(올림)을 가져온다', () => {
+    const P = 1_000_000;
+    const r = rankPlayers(
+      room({
+        '2': { by: 'a', at: 10 }, // a 4
+        '1': { by: 'b', at: 20 }, // b 2
+        '0': { by: 'b', at: 25 }, // b 3
+        [String(P)]: { by: 'c', at: 30 }, // c: a 에게서 2, b 에게서 2
+        '3': { by: 'a', at: 40 }, // a 2 + 2 = 4 (회수 뒤에 얻은 점수는 그대로)
+      }),
+      words,
+    );
+    const by = Object.fromEntries(r.map((x) => [x.id, x]));
+    expect(by.c).toMatchObject({ score: 4, stolen: 4, lost: 0, words: 0 });
+    expect(by.a).toMatchObject({ score: 4, lost: 2, words: 2 });
+    expect(by.b).toMatchObject({ score: 1, lost: 2, words: 2 });
+    expect(r.reduce((n, x) => n + x.score, 0)).toBe(9); // 전체 합은 그대로
+  });
   it('0점끼리는 같은 순위', () => {
     const r = rankPlayers(room({}), words);
     expect(r.map((x) => x.place)).toEqual([1, 1, 1]);

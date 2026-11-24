@@ -673,6 +673,16 @@ export function createLocalBackend(): Backend {
       return watch([K.rooms], () => rooms()[roomId] ?? null, cb);
     },
 
+    async setRoomDuration(roomId, sec) {
+      const u = me();
+      const myId = u && u.role === 'student' ? u.studentId : null;
+      await roomLock((rs) => {
+        const r = rs[roomId];
+        if (!r || r.state !== 'waiting' || r.host !== myId) return;
+        r.durationSec = Math.max(10, Math.min(600, Math.round(sec) || BATTLE_DURATION_SEC));
+      });
+    },
+
     async startRoom(roomId, fall) {
       const u = me();
       const myId = u && u.role === 'student' ? u.studentId : null;

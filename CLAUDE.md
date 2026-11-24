@@ -26,7 +26,11 @@
 - 자리연습·승급 테스트는 `KeyboardEvent.code` + `shiftKey` 로 물리 글쇠 판정. 낱말·단문·장문·배틀은 입력창 값을 자모열로 풀어 목표 자모열과 접두 비교.
 - 타수 = 정타 수 ÷ 분. Shift 조합 2타. 정확도 = 정타 ÷ (정타+오타). 오타는 고쳐도 남는다.
 - 자리 단계: 한글 K1~K8, 기호 S1~S2, 영문 E1~E7. 승급 테스트 50문항 90점 통과. 배틀 개방 = K8 + S2 통과.
-- 배틀 점수(정수): **기본자리 낱말 1점, 한 단어 2점, 두 단어 4점**. 방 정원 16명, 같은 계급끼리. 반 전체 동시 접속은 30명 기준.
+- 배틀 점수(정수): **기본자리 낱말 1점, 한 단어 2점, 두 단어 4점** + 특수 낱말 보너스(빠름 +1, 깜빡 +2, 흔들 +1, 황금은 기본 점수만큼 더). 방 정원 16명, 같은 계급끼리. 반 전체 동시 접속은 30명 기준.
+- 배틀 낱말은 네 방향(`FallingWord.dir`)으로 지나간다. 동시에 떠 있는 낱말 수 = 3 + 인원(4~16). 방향·특수 효과는 seed 에서 파생한 별도 난수로 정해 모든 참가자가 같다.
+- 배틀 파워게이지: 오타 없이 연속 20개(`POWER_NEED`)를 얻으면 포인트 회수(그 시점 다른 참가자 각자 점수의 절반, 올림). `rooms/{id}/claims` 의 번호 1000000 이상 칸(`POWER_INDEX_BASE`)에 기록하고 `rankPlayers` 가 시각 순으로 계산한다(보안 규칙 변경 없음).
+- 배틀 경기 시간: 기본 120초. 대기실에서 방장이 60/90/120/180/300초 중에 고른다(`backend.setRoomDuration`). 컴퓨터 대결은 120초 고정.
+- 배틀 배경음: `components/bgm.ts`(Web Audio 합성). 소리가 켜져 있고 `usePrefs.bgm` 이 켜져 있을 때 경기 중에만 난다.
 - 배틀 멈추기: `settings.freezePhrase` 를 친 학생만 `freezeSeconds`(기본 5초) 동안 입력 가능, 한 판에 한 사람 한 번(`rooms/{id}/freezes/{학번}`). 욕설(`engine/badwords` + `settings.badWordsExtra`)을 치면 `badWordSeconds`(기본 10초) 동안 그 학생만 입력 금지.
 - 배틀 낱말 낙하 속도는 점수별(`settings.fallSpeed`, 기본 1점 100% / 2점 115% / 4점 130%). 방이 시작될 때 `room.fall` 로 복사해 모든 참가자가 같은 일정을 만든다.
 - 계급: 훈련병 0 / 이등병 100 / 일병 300 / 상병 600 / 병장 1000 / 예비역 1500 RP. 강등 없음.
@@ -40,7 +44,7 @@
 - 새 패키지를 추가하지 않는다.
 
 ## 이미 만들어진 공용 코드 (새로 만들지 말고 쓸 것)
-- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 458건 통과 상태를 유지할 것.
+- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 501건 통과 상태를 유지할 것.
 - `src/data/index.ts` 의 `backend`, `src/state/auth.ts` 의 `useAuth()`({ready,user,student,settings}), `src/state/prefs.ts` 의 `usePrefs()`, `src/content/index.ts`(useContent, pickWords 등).
 - `src/state/record.ts`: 연습이 끝나면 반드시 `finishSession(rec, extra?)` 로 저장(배틀은 `finishBattle`). 학생 문서를 화면에서 직접 고치지 않는다(자리 연습 단계 완료 표시 `stageDrill` 만 예외로 `backend.updateStudent`).
 - `src/components/ui.tsx`(Modal, Btn, Card, Stat, Spinner, Kbd), `TierBadge.tsx`, `AppShell.tsx`(상단 바는 이미 있으므로 화면은 본문만 그린다. 본문 영역 높이는 `h-full`).

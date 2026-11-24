@@ -1025,6 +1025,20 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
       );
     },
 
+    setRoomDuration(roomId, sec) {
+      return run(async (fb) => {
+        const { D, db } = fb;
+        const me = myStudentId();
+        if (!me) throw new AppError('PERMISSION', '학생으로 로그인해야 합니다.');
+        const v = Math.max(10, Math.min(600, Math.round(sec) || BATTLE_DURATION_SEC));
+        // durationSec 칸만 바꾼다(방 전체를 다시 쓰지 않음). 방장·대기 중이 아니면 그대로 둔다.
+        const snap = await D.get(D.ref(db, `rooms/${roomId}`));
+        const cur = snap.val() as { host?: string; state?: string } | null;
+        if (!cur || cur.state !== 'waiting' || cur.host !== me) return;
+        await D.update(D.ref(db, `rooms/${roomId}`), { durationSec: v });
+      });
+    },
+
     startRoom(roomId, fall) {
       return run(async (fb) => {
         const { D, db } = fb;

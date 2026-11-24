@@ -2,8 +2,18 @@
 //
 // 공개 API
 //   mulberry32(seed: number): () => number     (rng.ts 에서 다시 내보냄)
-//   interface FallingWord { index: number; text: string; points: 1|2|4; spawnAt: number(ms, 시작 기준); fallMs: number; x: number(0~1, 낱말 가운데의 가로 위치) }
-//   concurrentCount(playerCount: number): number      4 + floor(인원/2), 최대 12
+//   interface FallingWord { index; text; points: 1|2|4(기본 점수); spawnAt: number(ms, 시작 기준); fallMs: number(화면을 가로지르는 시간);
+//       x: number(0~1, 진행 방향과 직각인 축의 위치. 위·아래로 움직이면 가로, 좌·우로 움직이면 세로 위치);
+//       dir: 'down'|'up'|'left'|'right'(움직이는 방향. down = 위에서 나와 아래로); fast·blink·zigzag·golden: boolean(특수 낱말);
+//       bonus: number(보너스 점수); score: number(얻는 점수 = points + bonus) }
+//     - 특수 낱말: 빠름(낙하 시간 ÷ 1.7, +1) · 깜빡(보였다 안 보였다, +2) · 흔들(지그재그, +1) · 황금(기본 점수만큼 더). 겹칠 수 있다.
+//     - 방향·특수 효과는 별도 난수(seed 에서 파생)로 정하므로 낱말·등장 시각·위치는 효과와 무관하게 같다. 처음 3개는 효과 없이 위에서 내려온다.
+//   wordAlpha(word, elapsedMs): number   깜빡 낱말의 불투명도(0~1). 보통 낱말은 1
+//   wordSway(word, elapsedMs): number    흔들 낱말의 직각 축 흔들림(−1~1). 보통 낱말은 0
+//   POWER_NEED = 20(연속 성공 수) · POWER_INDEX_BASE = 1000000 · isPowerIndex(i) · nextPowerIndex(claims)
+//     - 파워(포인트 회수)는 claims 의 POWER_INDEX_BASE 이상 번호 칸에 기록한다(낱말 번호와 겹치지 않음). 점수 계산은 scoring.rankPlayers.
+//   BATTLE_DURATIONS = [60, 90, 120, 180, 300] · normalizeDuration(sec): 목록에 없으면 120
+//   concurrentCount(playerCount: number): number      3 + 인원, 4~16
 //   fallMsAt(elapsedMs: number, durationMs: number): number   10000 → 6000 선형
 //   normalizeFallSpeed(x?): FallSpeed   점수별 낙하 속도(%)를 50~200 으로 정리(없으면 기본값)
 //   buildSchedule(seed: number, pool: string[], playerCount: number, durationSec: number, speed?: FallSpeed): FallingWord[]
@@ -34,6 +44,8 @@ export function normalizeFallSpeed(x?: Partial<FallSpeed> | null): FallSpeed {
 
 export { mulberry32 };
 
+export type WordDir = 'down' | 'up' | 'left' | 'right';
+
 export interface FallingWord {
   index: number;
   text: string;
@@ -41,10 +53,56 @@ export interface FallingWord {
   spawnAt: number;
   fallMs: number;
   x: number;
+  dir: WordDir;
+  fast: boolean;
+  blink: boolean;
+  zigzag: boolean;
+  golden: boolean;
+  bonus: number;
+  score: number;
+}
+
+export const FAST_MULT = 1.7;
+export const BLINK_CYCLE_MS = 1500;
+export const PLAIN_FIRST = 3; // 처음 몇 개는 효과 없이
+
+// ── 파워(포인트 회수) ──
+export const POWER_NEED = 20;
+export const POWER_INDEX_BASE = 1_000_000;
+export const isPowerIndex = (i: number) => Number.isFinite(i) && i >= POWER_INDEX_BASE;
+/** 아직 쓰이지 않은 가장 앞의 파워 칸 번호 */
+export function nextPowerIndex(claims: Record<string, unknown> | undefined | null): number {
+  let i = POWER_INDEX_BASE;
+  while (claims && Object.prototype.hasOwnProperty.call(claims, String(i))) i++;
+  return i;
+}
+
+// ── 경기 시간(방장이 고름) ──
+export const BATTLE_DURATIONS = [60, 90, 120, 180, 300] as const;
+export function normalizeDuration(sec: unknown): number {
+  const n = Math.round(Number(sec));
+  return (BATTLE_DURATIONS as readonly number[]).includes(n) ? n : 120;
 }
 
 export function concurrentCount(playerCount: number): number {
-  return Math.min(12, 4 + Math.floor(Math.max(1, playerCount) / 2));
+  return Math.max(4, Math.min(16, 3 + Math.floor(Math.max(1, playerCount))));
+}
+
+/** 깜빡 낱말의 불투명도: 주기의 앞 55% 는 보이고 나머지는 사라진다(경계는 부드럽게). */
+export function wordAlpha(word: Pick<FallingWord, 'blink' | 'spawnAt'>, elapsedMs: number): number {
+  if (!word.blink) return 1;
+  const ph = ((((elapsedMs - word.spawnAt) % BLINK_CYCLE_MS) + BLINK_CYCLE_MS) % BLINK_CYCLE_MS) / BLINK_CYCLE_MS;
+  const edge = 0.08;
+  if (ph < 0.55 - edge) return 1;
+  if (ph < 0.55) return (0.55 - ph) / edge;
+  if (ph < 1 - edge) return 0;
+  return (ph - (1 - edge)) / edge;
+}
+
+/** 흔들 낱말의 직각 축 흔들림(−1~1): 화면을 지나는 동안 3번 왕복. */
+export function wordSway(word: Pick<FallingWord, 'zigzag' | 'spawnAt' | 'fallMs'>, elapsedMs: number): number {
+  if (!word.zigzag || word.fallMs <= 0) return 0;
+  return Math.sin(((elapsedMs - word.spawnAt) / word.fallMs) * Math.PI * 6);
 }
 
 export function fallMsAt(elapsedMs: number, durationMs: number): number {
@@ -96,6 +154,7 @@ export function buildSchedule(
   if (uniq.length === 0 || durMs <= 0) return [];
 
   const rand = mulberry32(seed);
+  const fx = mulberry32((Math.floor(seed) ^ 0x9e3779b9) >>> 0); // 방향·특수 효과 전용
   const buckets: Record<1 | 2 | 4, string[]> = { 1: [], 2: [], 4: [] };
   for (const w of uniq) buckets[battlePoints(w)].push(w);
   const decks = { 1: new Deck(buckets[1], rand), 2: new Deck(buckets[2], rand), 4: new Deck(buckets[4], rand) };
@@ -163,7 +222,34 @@ export function buildSchedule(
       const lane = cands[randInt(rand, cands.length)];
       const jitter = (rand() - 0.5) * 0.3;
       const x = Math.round(((lane + 0.5 + jitter) / lanes) * 10000) / 10000;
-      out.push({ index: out.length, text, points, spawnAt: t, fallMs: Math.round(fall / mult[points]), x });
+      // 방향·특수 효과(난수는 항상 같은 횟수만큼 뽑는다)
+      const rd = fx();
+      const rf = fx();
+      const rb = fx();
+      const rz = fx();
+      const rg = fx();
+      const plain = out.length < PLAIN_FIRST;
+      const dir: WordDir = plain || rd < 0.4 ? 'down' : rd < 0.6 ? 'up' : rd < 0.8 ? 'left' : 'right';
+      const fast = !plain && rf < 0.15;
+      const blink = !plain && rb < 0.12;
+      const zigzag = !plain && rz < 0.12;
+      const golden = !plain && rg < 0.04;
+      const bonus = (fast ? 1 : 0) + (blink ? 2 : 0) + (zigzag ? 1 : 0) + (golden ? points : 0);
+      out.push({
+        index: out.length,
+        text,
+        points,
+        spawnAt: t,
+        fallMs: Math.round(fall / mult[points] / (fast ? FAST_MULT : 1)),
+        x,
+        dir,
+        fast,
+        blink,
+        zigzag,
+        golden,
+        bonus,
+        score: points + bonus,
+      });
       laneOf.push(lane);
       lastLane = lane;
       if (points === 4) count4++;

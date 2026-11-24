@@ -100,6 +100,14 @@ export default function BattleGame() {
     }
   }, [roomId, starting]);
 
+  // 방장: 경기 시간 바꾸기
+  const onDuration = useCallback(
+    (sec: number) => {
+      void backend.setRoomDuration(roomId, sec).catch(() => setError('경기 시간을 바꾸지 못했어요.'));
+    },
+    [roomId],
+  );
+
   const onLeave = useCallback(async () => {
     if (leftRef.current) return;
     leftRef.current = true;
@@ -174,7 +182,7 @@ export default function BattleGame() {
 
   if (room.state === 'waiting') {
     if (!inRoom) return <Dark>로비로 돌아가는 중...</Dark>;
-    return <BattleWaiting room={room} meId={meId} onStart={onStart} onLeave={onLeave} starting={starting} error={error} />;
+    return <BattleWaiting room={room} meId={meId} onStart={onStart} onLeave={onLeave} onDuration={onDuration} starting={starting} error={error} />;
   }
 
   if (!inRoom) {

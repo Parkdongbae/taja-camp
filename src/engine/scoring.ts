@@ -8,9 +8,10 @@
 //   battlePoints(text: string): 1 | 2 | 4   기본자리 낱말 1 / 한 단어 2 / 두 단어 이상 4 (두 단어가 모두 기본자리면 2)
 //   rpGain(playerCount: number, place: number, score: number, practice = false): number
 //       점수 0 이하면 0, 아니면 5 + 2×(인원−순위). practice(봇 연습 배틀)면 절반(내림)
-//   interface BattleRank { id: string; name: string; classNo: number; score: number; words: number; lastAt: number(마지막 득점 시각, 없으면 0); place: number }
-//   rankPlayers(room: BattleRoom, scheduleWords: { index: number; points: number }[]): BattleRank[]
-//       claims 합산. 정렬: 점수 ↓ → 획득 낱말 수 ↓ → 마지막 득점 시각 ↑ (셋 다 같으면 같은 순위). 명단에 없는 득점자도 포함.
+//   interface BattleRank { id: string; name: string; classNo: number; score: number; words: number; lastAt: number(마지막 득점 시각, 없으면 0); place: number; stolen: number(파워로 가져온 점수); lost: number(파워로 빼앗긴 점수) }
+//   rankPlayers(room: BattleRoom, scheduleWords: { index: number; points: number; score?: number }[]): BattleRank[]
+//       claims 를 시각 순으로 합산(낱말 점수는 score, 없으면 points). 파워 칸(번호 ≥ 1000000)은 그 시점에
+//       다른 참가자 각자의 점수 절반(올림)을 빼서 쓴 사람에게 더한다(BattleRank.stolen·lost 에 기록). 정렬: 점수 ↓ → 획득 낱말 수 ↓ → 마지막 득점 시각 ↑ (셋 다 같으면 같은 순위). 명단에 없는 득점자도 포함.
 //   xpFor(rec: { mode: SessionMode; accuracy: number; isBest: boolean }): number
 //       배틀 15 / 그 외 10 + 정확도(95%↑ +5, 100% +10) + 기록 갱신 +10
 //   DAILY_GOAL_XP = 30
@@ -81,25 +82,46 @@ export interface BattleRank {
   words: number;
   lastAt: number;
   place: number;
+  stolen: number;
+  lost: number;
 }
 
-export function rankPlayers(room: BattleRoom, scheduleWords: { index: number; points: number }[]): BattleRank[] {
+const POWER_BASE = 1_000_000; // engine/battle 의 POWER_INDEX_BASE 와 같은 값
+
+export function rankPlayers(room: BattleRoom, scheduleWords: { index: number; points: number; score?: number }[]): BattleRank[] {
   const pts = new Map<number, number>();
-  for (const w of scheduleWords) pts.set(w.index, w.points);
+  for (const w of scheduleWords) pts.set(w.index, w.score ?? w.points);
   const rows = new Map<string, BattleRank>();
   const row = (id: string): BattleRank => {
     let r = rows.get(id);
     if (!r) {
       const p = room.players?.[id];
-      r = { id, name: p?.name ?? id, classNo: p?.classNo ?? 0, score: 0, words: 0, lastAt: 0, place: 0 };
+      r = { id, name: p?.name ?? id, classNo: p?.classNo ?? 0, score: 0, words: 0, lastAt: 0, place: 0, stolen: 0, lost: 0 };
       rows.set(id, r);
     }
     return r;
   };
   for (const id of Object.keys(room.players ?? {})) row(id);
-  for (const [key, c] of Object.entries(room.claims ?? {})) {
-    const p = pts.get(Number(key));
-    if (p === undefined || !c?.by) continue;
+  const events = Object.entries(room.claims ?? {})
+    .filter(([, c]) => !!c?.by)
+    .map(([key, c]) => ({ i: Number(key), c }))
+    .sort((a, b) => a.c.at - b.c.at || a.i - b.i);
+  for (const { i, c } of events) {
+    if (i >= POWER_BASE) {
+      // 파워: 그 시점 다른 사람 점수의 절반(올림)을 가져온다
+      const me = row(c.by);
+      for (const o of [...rows.values()]) {
+        if (o.id === c.by || o.score <= 0) continue;
+        const take = Math.ceil(o.score / 2);
+        o.score -= take;
+        o.lost += take;
+        me.score += take;
+        me.stolen += take;
+      }
+      continue;
+    }
+    const p = pts.get(i);
+    if (p === undefined) continue;
     const r = row(c.by);
     r.score += p;
     r.words += 1;

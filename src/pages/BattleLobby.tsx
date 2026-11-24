@@ -278,7 +278,12 @@ export default function BattleLobby() {
             <div className="rounded-2xl bg-white/5 p-5 text-sm ring-1 ring-white/10">
               <div className="mb-2 font-bold">규칙</div>
               <ul className="space-y-1 text-white/70">
-                <li>· 같은 계급끼리 최대 {BATTLE_MAX_PLAYERS}명, {BATTLE_DURATION_SEC}초 경기</li>
+                <li>· 같은 계급끼리 최대 {BATTLE_MAX_PLAYERS}명, 기본 {BATTLE_DURATION_SEC / 60}분 경기(방장이 1~5분 중에서 고름)</li>
+                <li>· 낱말은 위·아래·왼쪽·오른쪽 사방에서 날아오고, 사람이 많을수록 더 많이 쏟아져요</li>
+                <li>
+                  · 특수 낱말 보너스: <span className="text-sky-300">⚡빠름 +1 · 👻깜빡 +2 · 🌀흔들 +1 · ★황금 2배</span>
+                </li>
+                <li>· 오타 없이 연속 20개를 얻으면 ⚡파워 발동! 다른 참가자 점수의 절반을 가져와요</li>
                 <li>
                   · <span className="text-white/50">기본자리 낱말 1점</span> · <span className="text-white">한 단어 2점</span> ·{' '}
                   <span className="text-gold">두 단어 4점</span>

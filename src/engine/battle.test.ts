@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BATTLE_DURATIONS,
+  FAST_MULT,
+  POWER_INDEX_BASE,
   buildSchedule,
   concurrentCount,
+  isPowerIndex,
+  nextPowerIndex,
+  normalizeDuration,
+  wordAlpha,
+  wordSway,
   fallMsAt,
   matchSubmission,
   mulberry32,
@@ -52,10 +60,11 @@ describe('concurrentCount / fallMsAt', () => {
   it.each([
     [1, 4],
     [2, 5],
-    [3, 5],
-    [8, 8],
-    [16, 12],
-    [30, 12],
+    [3, 6],
+    [8, 11],
+    [13, 16],
+    [16, 16],
+    [30, 16],
   ])('인원 %i → 동시 %i개', (n, c) => {
     expect(concurrentCount(n)).toBe(c);
   });
@@ -66,6 +75,41 @@ describe('concurrentCount / fallMsAt', () => {
     [200000, 6000],
   ])('fallMsAt(%i) = %i', (t, f) => {
     expect(fallMsAt(t, 120000)).toBe(f);
+  });
+});
+
+describe('깜빡·흔들·파워·경기 시간', () => {
+  it('wordAlpha: 보통 낱말은 1, 깜빡 낱말은 보였다 사라진다', () => {
+    expect(wordAlpha({ blink: false, spawnAt: 0 }, 900)).toBe(1);
+    const b = { blink: true, spawnAt: 1000 };
+    expect(wordAlpha(b, 1000)).toBe(1);
+    expect(wordAlpha(b, 1000 + 600)).toBe(1);
+    expect(wordAlpha(b, 1000 + 1000)).toBe(0);
+    expect(wordAlpha(b, 1000 + 1500)).toBe(1); // 다음 주기
+    for (let t = 1000; t < 6000; t += 37) {
+      const a = wordAlpha(b, t);
+      expect(a).toBeGreaterThanOrEqual(0);
+      expect(a).toBeLessThanOrEqual(1);
+    }
+  });
+  it('wordSway: 보통 낱말은 0, 흔들 낱말은 −1~1', () => {
+    expect(wordSway({ zigzag: false, spawnAt: 0, fallMs: 6000 }, 500)).toBe(0);
+    const z = { zigzag: true, spawnAt: 0, fallMs: 6000 };
+    expect(wordSway(z, 0)).toBe(0);
+    expect(wordSway(z, 500)).toBeCloseTo(1, 5);
+    for (let t = 0; t < 6000; t += 111) expect(Math.abs(wordSway(z, t))).toBeLessThanOrEqual(1);
+  });
+  it('파워 칸 번호', () => {
+    expect(isPowerIndex(3)).toBe(false);
+    expect(isPowerIndex(POWER_INDEX_BASE)).toBe(true);
+    expect(nextPowerIndex(undefined)).toBe(POWER_INDEX_BASE);
+    expect(nextPowerIndex({ '5': 1, [String(POWER_INDEX_BASE)]: 1 })).toBe(POWER_INDEX_BASE + 1);
+  });
+  it('경기 시간은 목록에 있는 값만, 아니면 120초', () => {
+    for (const d of BATTLE_DURATIONS) expect(normalizeDuration(d)).toBe(d);
+    expect(normalizeDuration(77)).toBe(120);
+    expect(normalizeDuration(undefined)).toBe(120);
+    expect(normalizeDuration('180')).toBe(180);
   });
 });
 
@@ -98,8 +142,9 @@ describe('buildSchedule', () => {
   });
   it('fallMs 는 10000 에서 6000 쪽으로 줄어든다', () => {
     expect(s16[0].fallMs).toBe(10000);
-    for (let i = 1; i < s16.length; i++) expect(s16[i].fallMs).toBeLessThanOrEqual(s16[i - 1].fallMs);
-    const last = s16[s16.length - 1];
+    const slow = s16.filter((w) => !w.fast); // 빠른 낱말은 따로 확인
+    for (let i = 1; i < slow.length; i++) expect(slow[i].fallMs).toBeLessThanOrEqual(slow[i - 1].fallMs);
+    const last = slow[slow.length - 1];
     expect(last.fallMs).toBeGreaterThanOrEqual(6000);
     expect(last.fallMs).toBeLessThan(6400);
   });
@@ -131,7 +176,7 @@ describe('buildSchedule', () => {
     const s = buildSchedule(7, POOL, n, 120);
     checkAt(s, concurrentCount(n) + 2);
   });
-  it.each([2, 8, 16])('인원 %i: 동시에 떠 있는 수 ≈ 4 + 인원/2', (n) => {
+  it.each([2, 8, 16])('인원 %i: 동시에 떠 있는 수 ≈ 3 + 인원(빠른 낱말만큼 줄 수 있음)', (n) => {
     const s = buildSchedule(11, POOL, n, 120);
     const c = concurrentCount(n);
     let maxVis = 0;
@@ -142,7 +187,8 @@ describe('buildSchedule', () => {
   it('4점 낱말이 최소 10%', () => {
     const pool = [...POOL.slice(0, 22), '지구 온난화'];
     for (const seed of [1, 2, 3, 4, 5]) {
-      const s = buildSchedule(seed, pool, 8, 120);
+      // 4점 낱말이 하나뿐이면 화면에 떠 있는 동안 다시 낼 수 없으므로 동시 수가 적은 방으로 확인
+      const s = buildSchedule(seed, pool, 4, 120);
       const n4 = s.filter((w) => w.points === 4).length;
       expect(n4 / s.length).toBeGreaterThanOrEqual(0.1);
     }
@@ -170,6 +216,33 @@ describe('buildSchedule', () => {
   it('인원이 많을수록 낱말이 많다', () => {
     expect(s16.length).toBeGreaterThan(s2.length);
   });
+  it('방향·특수 낱말: 처음 3개는 평범, 네 방향이 모두 나오고 점수 = 기본 + 보너스', () => {
+    for (const w of s16.slice(0, 3)) {
+      expect(w.dir).toBe('down');
+      expect(w.bonus).toBe(0);
+    }
+    expect(new Set(s16.map((w) => w.dir))).toEqual(new Set(['down', 'up', 'left', 'right']));
+    for (const w of s16) {
+      const bonus = (w.fast ? 1 : 0) + (w.blink ? 2 : 0) + (w.zigzag ? 1 : 0) + (w.golden ? w.points : 0);
+      expect(w.bonus).toBe(bonus);
+      expect(w.score).toBe(w.points + bonus);
+    }
+    for (const k of ['fast', 'blink', 'zigzag', 'golden'] as const) {
+      const n = s16.filter((w) => w[k]).length;
+      expect(n, k).toBeGreaterThan(0);
+      expect(n / s16.length, k).toBeLessThan(0.3);
+    }
+  });
+  it('빠른 낱말은 낙하 시간이 1.7배 짧다', () => {
+    for (const w of s16) {
+      const base = fallMsAt(w.spawnAt, 120000);
+      expect(w.fallMs).toBe(Math.round(base / (w.fast ? FAST_MULT : 1)));
+    }
+  });
+  it('효과는 낱말·등장 시각·위치를 바꾸지 않는다(인원만 같으면 같은 뼈대)', () => {
+    const a = buildSchedule(42, POOL, 16, 120);
+    expect(a.map((w) => [w.text, w.spawnAt, w.x])).toEqual(s16.map((w) => [w.text, w.spawnAt, w.x]));
+  });
   it('seed 는 큰 수·음수도 받는다', () => {
     expect(buildSchedule(2 ** 40 + 5, POOL, 4, 60).length).toBeGreaterThan(0);
     expect(buildSchedule(-7, POOL, 4, 60)).toEqual(buildSchedule(-7, POOL, 4, 60));
@@ -184,6 +257,13 @@ describe('visibleWords / wordY / matchSubmission', () => {
     spawnAt,
     fallMs,
     x: 0.5,
+    dir: 'down',
+    fast: false,
+    blink: false,
+    zigzag: false,
+    golden: false,
+    bonus: 0,
+    score: 2,
   });
   const sched = [w(0, '세포', 0), w(1, '분자', 2000), w(2, '세포', 11000)];
   it('visibleWords', () => {

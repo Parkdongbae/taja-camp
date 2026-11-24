@@ -7,14 +7,45 @@
 //   그동안 다른 참가자는 입력할 수 없다(한 판에 한 사람 한 번).
 // - 욕설: 화면에 없는 말을 냈는데 욕설이면 경고 창 + settings.badWordSeconds 동안 내 입력만 막는다.
 // - claims 에 들어온 낱말은 숨기고, 그 자리에 선점자 이름표 + 터지는 효과(0.6초). 내가 얻으면 +점수.
+// - 낱말은 네 방향(위→아래, 아래→위, 좌→우, 우→좌)으로 지나가고, 반대쪽 끝에 닿으면 사라진다.
+//   특수 낱말(⚡빠름 +1 · 👻깜빡 +2 · 🌀흔들 +1 · ★황금 2배)은 이름 옆에 보너스 표시.
+// - 파워게이지: 오타 없이 연속 POWER_NEED(20)개를 얻으면 자동으로 "포인트 회수"(다른 참가자 점수의 절반을 가져옴).
+//   claims 의 파워 칸(nextPowerIndex)에 driver.claim 으로 기록한다. 오타면 게이지 0, 한발 늦은 것은 유지.
+// - 배경음: 경기 중에만(소리 켬 + usePrefs.bgm). 마지막 20초에는 빨라진다.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BattleRoom } from '../../data/types';
-import { matchSubmission, visibleWords, wordY, type FallingWord } from '../../engine/battle';
+import {
+  matchSubmission,
+  nextPowerIndex,
+  isPowerIndex,
+  POWER_NEED,
+  visibleWords,
+  wordAlpha,
+  wordSway,
+  wordY,
+  type FallingWord,
+} from '../../engine/battle';
 import { normalizeText } from '../../engine/hangul';
 import { rankPlayers } from '../../engine/scoring';
 import { BattleInput, type SubmitResult } from './BattleInput';
 import { LANG_LABEL } from './battleUtil';
-import { playAlarm, playCombo, playEnd, playError, playFreeze, playLate, playScore, playStart, playTick, playWarn } from '../sound';
+import {
+  playAlarm,
+  playBonus,
+  playCombo,
+  playEnd,
+  playError,
+  playFreeze,
+  playLate,
+  playPower,
+  playScore,
+  playStart,
+  playTick,
+  playWarn,
+  soundEnabled,
+} from '../sound';
+import { setBgmFast, startBgm, stopBgm } from '../bgm';
+import { usePrefs } from '../../state/prefs';
 import { findBadWord } from '../../engine/badwords';
 import { activeFreeze, phraseKey, samePhrase } from '../../engine/freeze';
 import { useAuth } from '../../state/auth';
@@ -26,7 +57,12 @@ const WORD_COLOR: Record<1 | 2 | 4, string> = {
   2: 'text-white',
   4: 'text-gold drop-shadow-[0_0_6px_var(--color-gold)]',
 };
+const WORD_GOLDEN = 'text-ink bg-gold shadow-[0_0_12px_var(--color-gold)]';
 const BURST_MS = 600;
+const SWAY_PX = 26;
+const POWER_FX_MS = 2600;
+const lim = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(Math.max(lo, hi), n));
+const fxIcons = (w: FallingWord) => `${w.fast ? '⚡' : ''}${w.blink ? '👻' : ''}${w.zigzag ? '🌀' : ''}${w.golden ? '★' : ''}`;
 const LAST_SEC = 20;
 
 interface WordEl {
@@ -101,6 +137,12 @@ export function BattlePlay({
   const [ended, setEnded] = useState(t0 >= durMs);
   const [combo, setCombo] = useState<{ n: number; id: number } | null>(null);
   const streak = useRef(0);
+  // 파워게이지(오타 없이 연속으로 얻은 수)와 포인트 회수 알림
+  const powerRef = useRef(0);
+  const [power, setPower] = useState(0);
+  const [powerFx, setPowerFx] = useState<{ by: string; mine: boolean; amount: number; id: number } | null>(null);
+  const bgmOn = usePrefs((s) => s.bgm);
+  const soundOn = usePrefs((s) => s.sound) && settings.soundAllowed;
 
   // ── 낱말 애니메이션 ──
   useEffect(() => {
@@ -120,7 +162,7 @@ export function BattlePlay({
       box.style.minWidth = `${rec.w}px`;
       const tag = document.createElement('div');
       tag.className = `rounded-full px-2 py-0.5 text-xs font-bold ${mine ? 'bg-mint-500 text-white' : 'bg-white/25 text-white'}`;
-      tag.textContent = mine ? `나 +${word.points}` : name;
+      tag.textContent = mine ? `나 +${word.score}` : name;
       const txt = document.createElement('div');
       txt.className = `whitespace-nowrap text-2xl font-black ${mine ? 'text-mint-300' : 'text-white/60'}`;
       txt.textContent = word.text;
@@ -193,19 +235,34 @@ export function BattlePlay({
           seen.add(w.index);
           if (!rec) {
             const el = document.createElement('div');
-            el.className = `${WORD_BASE} ${WORD_COLOR[w.points]}`;
+            el.className = `${WORD_BASE} ${w.golden ? WORD_GOLDEN : WORD_COLOR[w.points]}`;
             el.textContent = w.text;
+            if (w.bonus > 0) {
+              const tag = document.createElement('span');
+              tag.className = `ml-1 align-top text-xs font-black ${w.golden ? 'text-ink' : 'text-sky-300'}`;
+              tag.textContent = `${fxIcons(w)}+${w.bonus}`;
+              el.appendChild(tag);
+            }
+            if (w.blink) el.style.transition = 'none';
             layer.appendChild(el);
             rec = { el, w: el.offsetWidth, h: el.offsetHeight, x: 0, y: 0 };
             els.set(w.index, rec);
           }
-          rec.x = Math.max(4, Math.min(W - rec.w - 4, w.x * W - rec.w / 2));
-          rec.y = wordY(w, t) * Math.max(0, H - rec.h);
+          // 진행 방향 축은 0→1, 직각 축은 w.x(+흔들림)
+          const p = wordY(w, t);
+          const sway = wordSway(w, t) * SWAY_PX;
+          if (w.dir === 'down' || w.dir === 'up') {
+            rec.x = lim(w.x * W - rec.w / 2 + sway, 4, W - rec.w - 4);
+            rec.y = (w.dir === 'down' ? p : 1 - p) * Math.max(0, H - rec.h);
+          } else {
+            rec.y = lim(w.x * H - rec.h / 2 + sway, 2, H - rec.h - 2);
+            rec.x = 4 + (w.dir === 'right' ? p : 1 - p) * Math.max(0, W - rec.w - 8);
+          }
           rec.el.style.transform = `translate3d(${rec.x}px, ${rec.y}px, 0)`;
-          rec.el.style.opacity = pendingRef.current.has(w.index) ? '0.35' : '1';
+          rec.el.style.opacity = String(wordAlpha(w, t) * (pendingRef.current.has(w.index) ? 0.35 : 1));
         }
       }
-      // 바닥에 닿은 낱말 지우기
+      // 끝에 닿은 낱말 지우기
       for (const [i, rec] of els) {
         if (!seen.has(i)) {
           rec.el.remove();
@@ -249,6 +306,8 @@ export function BattlePlay({
       const w = matchSubmission(schedule, t, typed, taken);
       if (!w) {
         streak.current = 0;
+        powerRef.current = 0;
+        setPower(0);
         // 욕설이면 경고 + 입력 금지
         if (st.badWordBlock !== false && findBadWord(typed, st.badWordsExtra)) {
           const sec = clamp(st.badWordSeconds ?? 10, 1, 120);
@@ -275,11 +334,24 @@ export function BattlePlay({
       }
       streak.current += 1;
       playScore(w.points);
+      if (w.bonus > 0) playBonus();
       if (streak.current >= 3) {
         setCombo({ n: streak.current, id: Date.now() });
         playCombo(streak.current);
       }
-      return { kind: 'ok', points: w.points };
+      // 파워게이지: 가득 차면 바로 포인트 회수(빈 파워 칸을 잡는다. 동시에 쓴 사람이 있으면 다음 칸)
+      powerRef.current += 1;
+      if (powerRef.current >= POWER_NEED) {
+        powerRef.current = 0;
+        const tried: Record<string, true> = {};
+        for (let k = 0; k < 4; k++) {
+          const idx = nextPowerIndex({ ...(roomRef.current.claims ?? {}), ...tried });
+          if (await driverRef.current.claim(idx)) break;
+          tried[String(idx)] = true;
+        }
+      }
+      setPower(powerRef.current);
+      return { kind: 'ok', points: w.score };
     },
     [schedule, durMs, meId],
   );
@@ -305,6 +377,32 @@ export function BattlePlay({
     return () => window.clearTimeout(id);
   }, [combo]);
 
+  // ── 포인트 회수 알림: claims 에 새 파워 칸이 생기면 한 번씩 ──
+  const seenPower = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const keys = Object.keys(room.claims ?? {}).filter((k) => isPowerIndex(Number(k)));
+    if (!seenPower.current) {
+      seenPower.current = new Set(keys); // 들어올 때 이미 있던 것은 알리지 않음
+      return;
+    }
+    for (const k of keys) {
+      if (seenPower.current.has(k)) continue;
+      seenPower.current.add(k);
+      const by = room.claims[k]?.by ?? '';
+      const rest = { ...room.claims };
+      delete rest[k];
+      const score = (claims: BattleRoom['claims']) => rankPlayers({ ...room, claims }, schedule).find((r) => r.id === meId)?.score ?? 0;
+      const amount = Math.abs(score(room.claims) - score(rest));
+      setPowerFx({ by, mine: by === meId, amount, id: Date.now() });
+      playPower(by === meId);
+    }
+  }, [room, schedule, meId]);
+  useEffect(() => {
+    if (!powerFx) return;
+    const id = window.setTimeout(() => setPowerFx(null), POWER_FX_MS);
+    return () => window.clearTimeout(id);
+  }, [powerFx]);
+
   // ── 점수판 ──
   const ranks = useMemo(() => rankPlayers(room, schedule), [room, schedule]);
   const mine = ranks.find((r) => r.id === meId);
@@ -317,6 +415,16 @@ export function BattlePlay({
   useEffect(() => {
     if (frozen) playFreeze();
   }, [frozen]);
+
+  // ── 배경음: 경기 중에만, 마지막 20초는 빠르게 ──
+  useEffect(() => {
+    if (!active || !bgmOn || !soundOn) return;
+    startBgm();
+    return () => stopBgm();
+  }, [active, bgmOn, soundOn]);
+  useEffect(() => {
+    setBgmFast(last);
+  }, [last]);
 
   // ── 효과음: 카운트다운·시작·마지막 20초·마지막 5초·종료 (값이 바뀌는 순간에만) ──
   const snd = useRef({ countdown, remain, last, ended });
@@ -340,12 +448,26 @@ export function BattlePlay({
           <div className={`text-3xl font-black tabular-nums ${last ? 'animate-pulse text-miss' : ''}`}>
             {countdown > 0 ? mmss(room.durationSec) : mmss(remain)}
           </div>
-          <div className="text-sm">
-            내 점수 <b className="text-2xl tabular-nums text-gold">{mine?.score ?? 0}</b>
+          <div className="flex items-center gap-3 text-sm">
+            {soundEnabled() && (
+              <button
+                type="button"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => usePrefs.getState().set({ bgm: !bgmOn })}
+                className={`rounded-full px-2.5 py-1 text-xs font-bold ${bgmOn ? 'bg-mint-500 text-white' : 'bg-white/10 text-white/50'}`}
+                title="배경음 켜기/끄기"
+              >
+                🎵 배경음 {bgmOn ? '켬' : '끔'}
+              </button>
+            )}
+            <span>
+              내 점수 <b className="text-2xl tabular-nums text-gold">{mine?.score ?? 0}</b>
+            </span>
           </div>
         </div>
 
-        <div className={`relative min-h-0 flex-1 overflow-hidden border-b-2 border-miss/50 transition-colors duration-700 ${last ? 'bg-miss/10' : 'bg-white/[0.03]'}`}>
+        <div className={`relative min-h-0 flex-1 overflow-hidden border-2 border-miss/40 transition-colors duration-700 ${last ? 'bg-miss/10' : 'bg-white/[0.03]'}`}>
           <div ref={layerRef} className="absolute inset-0" />
           {countdown > 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-ink/60">
@@ -391,7 +513,35 @@ export function BattlePlay({
               연속 획득! ×{combo.n}
             </div>
           )}
-          <div className="pointer-events-none absolute bottom-1 right-3 text-xs text-white/25">바닥</div>
+          {powerFx && active && (
+            <div
+              key={powerFx.id}
+              className={`anim-pop pointer-events-none absolute inset-x-0 top-1/3 mx-auto w-fit rounded-3xl px-8 py-4 text-center shadow-2xl ${
+                powerFx.mine ? 'bg-gold text-ink' : 'bg-miss text-white'
+              }`}
+            >
+              <div className="text-4xl font-black">⚡ 포인트 회수!</div>
+              <div className="mt-1 text-lg font-bold">
+                {powerFx.mine
+                  ? `모두에게서 +${powerFx.amount}점을 가져왔어요`
+                  : `${room.players?.[powerFx.by]?.name ?? powerFx.by} 님에게 ${powerFx.amount}점을 빼앗겼어요`}
+              </div>
+            </div>
+          )}
+          <div className="pointer-events-none absolute bottom-1 right-3 text-xs text-white/25">낱말은 사방에서 날아와요</div>
+        </div>
+
+        <div className="flex h-8 shrink-0 items-center gap-3 px-6" aria-label={`파워게이지 ${power} / ${POWER_NEED}`}>
+          <div className={`w-28 text-xs font-bold ${power >= POWER_NEED - 5 ? 'text-gold' : 'text-white/60'}`}>
+            ⚡ 파워 {power}/{POWER_NEED}
+          </div>
+          <div className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
+            <div
+              className={`h-full rounded-full transition-all duration-200 ${power >= POWER_NEED - 5 ? 'animate-pulse bg-gold' : 'bg-mint-500'}`}
+              style={{ width: `${(power / POWER_NEED) * 100}%` }}
+            />
+          </div>
+          <div className="text-[11px] text-white/40">오타 없이 연속 {POWER_NEED}개 → 상대 점수 절반 회수</div>
         </div>
 
         <BattleInput
@@ -436,6 +586,7 @@ export function BattlePlay({
           <div className="mt-1 text-[11px] text-white/40">
             <span className="text-white/45">■ 1점</span> <span className="text-white">■ 2점</span> <span className="text-gold">■ 4점</span>
           </div>
+          <div className="mt-0.5 text-[11px] text-sky-300/80">⚡빠름 +1 · 👻깜빡 +2 · 🌀흔들 +1 · ★황금 2배</div>
         </div>
       </aside>
     </div>

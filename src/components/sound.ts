@@ -7,7 +7,8 @@
 //   playFanfare()  승급·진급·결과 창: 2초 이내 팡파르
 //   배틀: playTick(high?) 카운트다운 "삑" · playStart() 시작 · playScore(1|2|4) 낱말 획득 · playCombo(n) 연속 획득
 //         playLate() 한발 늦음 · playWarn() 마지막 20초 · playEnd() 경기 종료
-//         playFreeze() 멈추기 발동 · playAlarm() 욕설 경고
+//         playFreeze() 멈추기 발동 · playAlarm() 욕설 경고 · playPower(mine) 포인트 회수(내가 쓰면 상승, 당하면 하강)
+//         playBonus() 특수 낱말 획득
 //   soundEnabled() 지금 소리를 내도 되는가 (usePrefs.sound 와 useAuth.settings.soundAllowed)
 // 소리가 꺼져 있거나 Web Audio 를 쓸 수 없으면 아무것도 하지 않는다. 음량은 usePrefs.volume, 테마는 usePrefs.soundTheme.
 import { usePrefs, type SoundTheme } from '../state/prefs';
@@ -215,4 +216,24 @@ export function playAlarm(): void {
   const r = ready();
   if (!r) return;
   for (let i = 0; i < 3; i++) tone(r, 'sawtooth', 220, 160, 0.22, 0.3, i * 0.28);
+}
+
+/** 포인트 회수: 내가 쓰면 힘차게 올라가고, 당하면 내려간다. */
+export function playPower(mine: boolean): void {
+  const r = ready();
+  if (!r) return;
+  if (mine) {
+    [523.25, 659.25, 783.99, 1046.5, 1318.5, 1568].forEach((f, i) => tone(r, 'sawtooth', f, f * 1.02, i === 5 ? 0.5 : 0.12, 0.2, i * 0.07));
+    tone(r, 'sine', 110, 55, 0.6, 0.4);
+  } else {
+    [880, 659.25, 523.25, 392].forEach((f, i) => tone(r, 'square', f, f * 0.94, 0.16, 0.16, i * 0.1));
+  }
+}
+
+/** 특수 낱말(빠름·깜빡·흔들·황금) 획득: 반짝이는 높은 음. */
+export function playBonus(): void {
+  const r = ready();
+  if (!r) return;
+  tone(r, 'sine', 2093, 2637, 0.12, 0.16, 0.1);
+  tone(r, 'sine', 3136, 3136, 0.2, 0.1, 0.18);
 }
