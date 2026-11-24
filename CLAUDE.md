@@ -14,7 +14,7 @@
 | `src/data/types.ts`, `src/data/backend.ts` | 공통 타입·데이터 인터페이스. **합의 없이 바꾸지 말 것**(필요하면 필드 추가만, 보고에 명시) |
 | `src/data/index.ts` | `export const backend: Backend` (환경에 따라 firebase/local 선택) |
 | `src/engine/` | 순수 로직(React·DOM·Firebase 의존 금지). 자모 분해, 판정, 단계, 점수, 배틀 일정. vitest 테스트 포함 |
-| `src/content/` | 내장 기초 콘텐츠(`builtin.ts`)와 콘텐츠 로더 |
+| `src/content/` | 내장 콘텐츠(`builtin.ts` 기초 + `subjects.ts` 국·영·수·사·과, 모두 새로 쓴 것)와 콘텐츠 로더 |
 | `src/state/` | zustand 스토어(`useAuth`, `useSettings`, `usePrefs`) |
 | `src/components/` | 공용 UI (가상 키보드, 손 실루엣, 모달 등) |
 | `src/pages/` | 화면 |
@@ -50,7 +50,7 @@
 - 새 패키지를 추가하지 않는다.
 
 ## 이미 만들어진 공용 코드 (새로 만들지 말고 쓸 것)
-- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 522건 통과 상태를 유지할 것.
+- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 527건 통과 상태를 유지할 것.
 - `src/data/index.ts` 의 `backend`, `src/state/auth.ts` 의 `useAuth()`({ready,user,student,settings}), `src/state/prefs.ts` 의 `usePrefs()`, `src/content/index.ts`(useContent, pickWords 등).
 - `src/state/record.ts`: 연습이 끝나면 반드시 `finishSession(rec, extra?)` 로 저장(배틀은 `finishBattle`). 학생 문서를 화면에서 직접 고치지 않는다(자리 연습 단계 완료 표시 `stageDrill` 만 예외로 `backend.updateStudent`).
 - `src/components/ui.tsx`(Modal, Btn, Card, Stat, Spinner, Kbd), `TierBadge.tsx`, `AppShell.tsx`(상단 바는 이미 있으므로 화면은 본문만 그린다. 본문 영역 높이는 `h-full`).

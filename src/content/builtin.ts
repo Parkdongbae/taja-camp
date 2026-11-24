@@ -1,7 +1,8 @@
 import type { ContentBundle } from '../data/types';
+import { SUBJECT_PASSAGES, SUBJECT_SENTENCES, SUBJECT_WORDS } from './subjects';
 
 // 기초 콘텐츠: 모두 새로 쓴 낱말, 문장, 글이다.
-export const BUILTIN: ContentBundle = {
+const BASIC: ContentBundle = {
   version: 'builtin-1',
   words: [
   {"id":"w-bas-001","text":"나라","meaning":"많은 사람이 모여 사는 하나의 국가","lang":"ko","subject":"basic","unit":"기본자리","level":1},
@@ -395,4 +396,12 @@ export const BUILTIN: ContentBundle = {
   {"id":"p-bas-11","title":"A Good Morning Routine","text":"Every morning, Mina wakes up at seven o'clock. She opens the window and takes a deep breath of fresh air. Then she eats a simple breakfast with her family. Before leaving home, she checks her bag to make sure she has her books and her lunch box. On the way to school, she walks with her friend Joon and they talk about the day ahead. After school, she practices typing for ten minutes, because she wants to type faster and more accurately. Mina believes that small habits make a big difference.","lang":"en","subject":"basic","unit":"읽을거리","level":2},
   {"id":"p-bas-12","title":"Why Practice Matters","text":"Learning a new skill is like planting a seed. At first, you cannot see anything. But if you water the seed every day, it slowly grows into a strong plant. Typing is the same. When you begin, your fingers move slowly and you make many mistakes. That is normal. The best way to improve is to practice a little every day and to focus on accuracy before speed. If you can see even a small improvement, you are moving in the right direction.","lang":"en","subject":"basic","unit":"읽을거리","level":3},
   ],
+};
+
+// 내장 콘텐츠 = 기초 + 과목(국어·영어·수학·사회·과학). 데모 모드와 새로 설치한 학교에서도 바로 쓴다.
+export const BUILTIN: ContentBundle = {
+  version: 'builtin-2',
+  words: [...BASIC.words, ...SUBJECT_WORDS],
+  sentences: [...BASIC.sentences, ...SUBJECT_SENTENCES],
+  passages: [...BASIC.passages, ...SUBJECT_PASSAGES],
 };
