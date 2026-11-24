@@ -1,4 +1,5 @@
 // 배틀 방(/battle/:roomId). watchRoom 으로 방을 구독하고 상태별 화면을 보여 준다.
+// 학급 배틀(room.klass): 정원 CLASS_MAX_PLAYERS, 시간·방식 변경 없음, 결과는 BattleResult 가 반 총점으로 저장한다.
 //   waiting → BattleWaiting (대기실)   playing → BattlePlay (카운트다운·경기)   done → BattleResult (결과)
 // - 입장은 로비에서만 한다. 여기서는 방에 들어가지 않는다.
 // - 참가자 목록에 내가 없으면: 대기 중이면 로비로, 경기 중이면 관전 불가 안내 후 로비로.
@@ -8,6 +9,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { backend } from '../data';
 import { BATTLE_MAX_PLAYERS, type BattleRoom } from '../data/types';
 import { buildSchedule, normalizeFallSpeed } from '../engine/battle';
+import { CLASS_MAX_PLAYERS } from '../engine/classBattle';
 import { useAuth } from '../state/auth';
 import { useContent } from '../content';
 import { Btn, Kbd } from '../components/ui';
@@ -103,6 +105,7 @@ export default function BattleGame() {
   // 방장: 경기 시간 바꾸기
   const onDuration = useCallback(
     (sec: number) => {
+      if (roomRef.current?.klass) return;
       void backend.setRoomDuration(roomId, sec).catch(() => setError('경기 시간을 바꾸지 못했어요.'));
     },
     [roomId],
@@ -111,6 +114,7 @@ export default function BattleGame() {
   // 방장: 개인전·팀전 바꾸기
   const onMode = useCallback(
     (mode: 'ffa' | 'team') => {
+      if (roomRef.current?.klass) return;
       void backend.setRoomMode(roomId, mode).catch(() => setError('경기 방식을 바꾸지 못했어요. (서버 규칙이 아직 반영되지 않았을 수 있어요)'));
     },
     [roomId],
@@ -129,13 +133,14 @@ export default function BattleGame() {
 
   // 정원이 차면 방장이 자동 시작
   const playerCount = room ? Object.keys(room.players ?? {}).length : 0;
+  const maxPlayers = room?.klass ? CLASS_MAX_PLAYERS : BATTLE_MAX_PLAYERS;
   const autoStarted = useRef(false);
   useEffect(() => {
-    if (!room || room.state !== 'waiting' || room.host !== meId || playerCount < BATTLE_MAX_PLAYERS) return;
+    if (!room || room.state !== 'waiting' || room.host !== meId || playerCount < maxPlayers) return;
     if (autoStarted.current) return;
     autoStarted.current = true;
     void onStart();
-  }, [room, meId, playerCount, onStart]);
+  }, [room, meId, playerCount, maxPlayers, onStart]);
 
   // ── 낱말 일정(모든 참가자가 같은 값) ──
   const seed = room?.seed ?? 0;
@@ -163,9 +168,11 @@ export default function BattleGame() {
     [started, loaded, seed, startCount, durationSec, lang, words, hasFall, fall1, fall2, fall4],
   );
 
+  const isClass = !!room?.klass;
+  // 학급 배틀은 바로 새 방을 만들지 않고 로비로 돌아간다
   const again = useCallback(
-    () => nav('/battle', { replace: true, state: { again: true, lang } satisfies LobbyState }),
-    [nav, lang],
+    () => nav('/battle', { replace: true, state: isClass ? null : ({ again: true, lang } satisfies LobbyState) }),
+    [nav, lang, isClass],
   );
   const exit = useCallback(() => nav('/home'), [nav]);
 
@@ -188,6 +195,7 @@ export default function BattleGame() {
         words: me?.words ?? 0,
         seconds: r.durationSec,
         lang: r.lang,
+        classBattle: !!r.klass,
       }),
     [],
   );
@@ -225,6 +233,7 @@ export default function BattleGame() {
       settle={settle}
       onAgain={again}
       onExit={exit}
+      againLabel={isClass ? '로비로' : undefined}
     />
   );
 }

@@ -1,14 +1,17 @@
 // 배틀 로비(/battle): 입장 조건 확인, 내 계급·RP, 같은 계급 방 현황, [친구와 배틀 Enter], [컴퓨터와 대결 C](/battle/solo).
+// 학급 배틀(settings.classBattle 가 켜져 있고 반이 있는 학생): [🏫 학급 배틀 K] 로 같은 반 방에 들어간다. 자리 단계·계급과 상관없이 열린다.
 // 결과 화면의 [한 판 더] 는 router state { again: true, lang } 로 넘어와 바로 입장한다.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { backend } from '../data';
-import { AppError, BATTLE_DURATION_SEC, BATTLE_MAX_PLAYERS, type BattleRoom, type Lang } from '../data/types';
+import { AppError, BATTLE_DURATION_SEC, BATTLE_MAX_PLAYERS, type BattleRoom, type ClassBattleRecord, type Lang } from '../data/types';
 import { useAuth } from '../state/auth';
 import { usePrefs } from '../state/prefs';
 import { playScore } from '../components/sound';
 import { getStage, isBattleUnlocked, isEnBattleUnlocked, nextStageId } from '../engine/stages';
 import { tierProgress } from '../engine/scoring';
+import { isMemberId } from '../engine/member';
+import { CLASS_MAX_PLAYERS, classStandings, klassOf, normalizeClassDuration } from '../engine/classBattle';
 import { TierBadge } from '../components/TierBadge';
 import { Btn, Kbd } from '../components/ui';
 import { BATTLE_LANG_KEY, LANG_LABEL, readBattleLang, type LobbyState } from '../components/battle/battleUtil';
@@ -36,6 +39,21 @@ export default function BattleLobby() {
   const [error, setError] = useState('');
   const [notice] = useState(navState?.notice ?? '');
   const open = unlocked && settings.battleEnabled;
+  // 학급 배틀: 선생님이 켰고 반이 있는 학생이면 일반 배틀 잠금과 상관없이 입장
+  const classOpen = !!settings.classBattle && !!student && !isMemberId(student.id) && student.grade > 0 && student.classNo > 0;
+  const classSec = normalizeClassDuration(settings.classBattleSec);
+  const [records, setRecords] = useState<ClassBattleRecord[]>([]);
+  useEffect(() => {
+    if (!settings.classBattle) return;
+    let off = false;
+    backend
+      .listClassBattles(100)
+      .then((l) => !off && setRecords(l))
+      .catch(() => undefined);
+    return () => {
+      off = true;
+    };
+  }, [settings.classBattle]);
 
   useEffect(() => {
     try {
@@ -82,6 +100,26 @@ export default function BattleLobby() {
     void join();
   }, [navState?.again, open, join, nav, loc.pathname]);
 
+  const joinClass = useCallback(async () => {
+    if (!student || !classOpen || joiningRef.current) return;
+    joiningRef.current = true;
+    setJoining(true);
+    setError('');
+    try {
+      const id = await backend.joinOrCreateClassRoom(
+        klassOf(student.grade, student.classNo),
+        'ko',
+        { id: student.id, name: student.name, classNo: student.classNo, joinedAt: 0, online: true },
+        classSec,
+      );
+      nav(`/battle/${id}`);
+    } catch (e) {
+      setError(e instanceof AppError && e.code === 'ROOM_FULL' ? '우리 반 방이 가득 찼어요.' : '입장하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+      joiningRef.current = false;
+      setJoining(false);
+    }
+  }, [student, classOpen, classSec, nav]);
+
   const solo = useCallback(() => {
     if (open && !joiningRef.current) nav('/battle/solo', { state: { lang } satisfies LobbyState });
   }, [open, lang, nav]);
@@ -90,6 +128,13 @@ export default function BattleLobby() {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.isComposing) return;
+      if (e.code === 'KeyK' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (classOpen) {
+          e.preventDefault();
+          void joinClass();
+        }
+        return;
+      }
       if (e.code === 'KeyC' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         // 한글 입력 상태에서도 되도록 물리 글쇠(code)로 본다
         if (open) {
@@ -102,6 +147,7 @@ export default function BattleLobby() {
         if (e.target instanceof HTMLButtonElement) return; // 버튼 자체의 클릭으로 처리
         e.preventDefault();
         if (open) void join();
+        else if (classOpen) void joinClass();
         else if (!unlocked) nav('/position');
         else nav('/home');
       } else if (e.key === 'Escape') {
@@ -113,12 +159,12 @@ export default function BattleLobby() {
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [open, unlocked, enUnlocked, join, solo, nav]);
+  }, [open, unlocked, enUnlocked, classOpen, join, joinClass, solo, nav]);
 
   if (!student) return null;
 
   // ── 잠김 ──
-  if (!open) {
+  if (!open && !classOpen) {
     const koLeft = Math.max(0, 8 - student.position.ko);
     const symLeft = Math.max(0, 2 - student.position.symbol);
     const nextId = nextStageId(student.position, 'ko') ?? nextStageId(student.position, 'symbol');
@@ -165,12 +211,14 @@ export default function BattleLobby() {
 
   const waiting = (rooms ?? []).filter((r) => r.state === 'waiting');
   const playing = (rooms ?? []).filter((r) => r.state === 'playing');
+  const standings = classStandings(records);
+  const myKlass = student.grade * 100 + student.classNo;
 
   return (
     <div className="h-full bg-ink text-white">
       <div className="mx-auto flex h-full max-w-5xl flex-col gap-5 p-6">
         {notice && <div className="rounded-xl bg-gold/15 px-4 py-2 text-sm text-gold">{notice}</div>}
-        {tempOpen && (
+        {open && tempOpen && (
           <div className="rounded-xl bg-gold/15 px-4 py-2 text-sm text-gold">
             선생님이 배틀을 임시로 열어 두었어요. 임시 공개가 끝나면 자리연습을 모두 통과해야 들어올 수 있어요.
           </div>
@@ -178,7 +226,7 @@ export default function BattleLobby() {
 
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-black">⚔️ 배틀 모드</h1>
-          {enUnlocked && (
+          {open && enUnlocked && (
             <div className="flex rounded-xl bg-white/10 p-1" title="← → 로 바꾸기">
               {(['ko', 'en'] as Lang[]).map((l) => (
                 <button
@@ -197,7 +245,30 @@ export default function BattleLobby() {
 
         <div className="grid min-h-0 flex-1 grid-cols-5 gap-5">
           {/* 왼쪽: 내 계급 + 입장 */}
-          <div className="col-span-3 flex flex-col gap-5">
+          <div className="col-span-3 flex min-h-0 flex-col gap-5 overflow-auto">
+            {classOpen && (
+              <button
+                onClick={() => void joinClass()}
+                disabled={joining}
+                className="flex shrink-0 items-center justify-between rounded-2xl bg-gold px-6 py-5 text-left text-ink shadow-lg ring-4 ring-gold/30 transition hover:brightness-105 disabled:opacity-60"
+              >
+                <div>
+                  <div className="text-3xl font-black">{joining ? '입장하는 중...' : '🏫 학급 배틀'}</div>
+                  <div className="mt-1 text-sm font-bold opacity-80">
+                    {student.grade}학년 {student.classNo}반 모두 함께 · {classSec / 60}분 · 반 총점 기록
+                  </div>
+                </div>
+                <div className="shrink-0 text-right text-xs font-bold opacity-80">
+                  <Kbd>K</Kbd>
+                  {!open && (
+                    <>
+                      {' '}
+                      <Kbd>Enter</Kbd>
+                    </>
+                  )}
+                </div>
+              </button>
+            )}
             <div className="rounded-2xl bg-white/5 p-6 ring-1 ring-white/10">
               <div className="flex items-center justify-between">
                 <div className="text-sm text-white/60">내 계급</div>
@@ -216,19 +287,25 @@ export default function BattleLobby() {
 
             <button
               onClick={() => void join()}
-              disabled={joining}
-              className="flex flex-1 flex-col items-center justify-center rounded-2xl bg-mint-500 text-white shadow-lg transition hover:bg-mint-600 disabled:opacity-60"
+              disabled={joining || !open}
+              className="flex min-h-28 flex-1 flex-col items-center justify-center rounded-2xl bg-mint-500 text-white shadow-lg transition hover:bg-mint-600 disabled:opacity-60"
             >
               <div className="text-4xl font-black">{joining ? '입장하는 중...' : '⚔️ 친구와 배틀'}</div>
               <div className="mt-2 text-sm opacity-90">
-                {tp.name} · {LANG_LABEL[lang]} 방 <Kbd>Enter</Kbd>
+                {open ? (
+                  <>
+                    {tp.name} · {LANG_LABEL[lang]} 방 <Kbd>Enter</Kbd>
+                  </>
+                ) : (
+                  '일반 배틀은 지금 열려 있지 않아요'
+                )}
               </div>
             </button>
             {error && <div className="text-center text-sm text-miss">{error}</div>}
 
             <button
               onClick={solo}
-              disabled={joining}
+              disabled={joining || !open}
               className="flex items-center justify-between rounded-2xl bg-white/10 px-6 py-4 text-left ring-1 ring-white/15 transition hover:bg-white/15 disabled:opacity-60"
             >
               <div>
@@ -251,11 +328,13 @@ export default function BattleLobby() {
           <div className="col-span-2 flex min-h-0 flex-col gap-5">
             <div className="flex min-h-0 flex-1 flex-col rounded-2xl bg-white/5 p-5 ring-1 ring-white/10">
               <div className="flex items-baseline justify-between">
-                <div className="font-bold">{tp.name} 방 현황</div>
+                <div className="font-bold">{open ? `${tp.name} 방 현황` : '방 현황'}</div>
                 <div className="text-xs text-white/50">경기 중 {playing.length}개</div>
               </div>
               <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-auto">
-                {rooms === null ? (
+                {!open ? (
+                  <div className="text-sm text-white/50">일반 배틀이 닫혀 있어요.</div>
+                ) : rooms === null ? (
                   <div className="text-sm text-white/40">불러오는 중...</div>
                 ) : waiting.length === 0 ? (
                   <div className="text-sm text-white/50">대기 중인 방이 없어요. 입장하면 새 방을 만들어요.</div>
@@ -275,9 +354,37 @@ export default function BattleLobby() {
               </div>
             </div>
 
-            <div className="rounded-2xl bg-white/5 p-5 text-sm ring-1 ring-white/10">
+            {settings.classBattle && standings.length > 0 && (
+              <div className="shrink-0 rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
+                <div className="mb-2 text-sm font-bold">🏫 반별 최고 총점</div>
+                <ol className="max-h-32 space-y-1 overflow-auto text-sm">
+                  {standings.map((c) => {
+                    const mine = c.grade * 100 + c.classNo === myKlass;
+                    return (
+                      <li
+                        key={`${c.grade}-${c.classNo}`}
+                        className={`flex items-center gap-3 rounded-lg px-3 py-1 ${mine ? 'bg-gold font-bold text-ink' : 'bg-white/5'}`}
+                      >
+                        <span className="w-6 text-center tabular-nums">{c.place}</span>
+                        <span className="flex-1">
+                          {c.grade}학년 {c.classNo}반{mine ? ' (우리 반)' : ''}
+                        </span>
+                        <span className="tabular-nums">{c.best.toLocaleString()}점</span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            )}
+
+            <div className="min-h-0 shrink overflow-auto rounded-2xl bg-white/5 p-5 text-sm ring-1 ring-white/10">
               <div className="mb-2 font-bold">규칙</div>
               <ul className="space-y-1 text-white/70">
+                {settings.classBattle && (
+                  <li>
+                    · <span className="text-gold">🏫 학급 배틀</span>: 같은 반이 한 방에서 최대 {CLASS_MAX_PLAYERS}명, 반 총점이 기록돼요. 참여하면 모두 RP +10
+                  </li>
+                )}
                 <li>· 같은 계급끼리 최대 {BATTLE_MAX_PLAYERS}명, 기본 {BATTLE_DURATION_SEC / 60}분 경기(방장이 1~5분 중에서 고름)</li>
                 <li>· 낱말은 위·아래·왼쪽·오른쪽 사방에서 날아오고, 사람이 많을수록 더 많이 쏟아져요</li>
                 <li>
@@ -327,7 +434,17 @@ export default function BattleLobby() {
         </label>
 
         <div className="text-center text-xs text-white/40">
-          <Kbd>Enter</Kbd> 친구와 배틀 · <Kbd>C</Kbd> 컴퓨터와 대결 · <Kbd>Esc</Kbd> 홈{enUnlocked ? ' · ← → 한국어/ENG' : ''}
+          {open && (
+            <>
+              <Kbd>Enter</Kbd> 친구와 배틀 · <Kbd>C</Kbd> 컴퓨터와 대결 ·{' '}
+            </>
+          )}
+          {classOpen && (
+            <>
+              <Kbd>K</Kbd> 학급 배틀 ·{' '}
+            </>
+          )}
+          <Kbd>Esc</Kbd> 홈{open && enUnlocked ? ' · ← → 한국어/ENG' : ''}
         </div>
       </div>
     </div>

@@ -31,6 +31,7 @@
 //   applyBattle(student: Student, r: { playerCount: number; place: number; score: number; practice?: boolean }): Partial<Student>
 //       rp, games, wins(1등 && 점수>0 && 2명 이상), badges. (XP 는 applySession 에 mode 'battle' 기록으로)
 //       practice(컴퓨터 대결)면 rp 만 절반 반영하고 games·wins 는 그대로 둔다.
+//       classBattle(학급 배틀)이면 rp 는 점수 1 이상일 때 CLASS_RP(참여 점수), games·wins 는 그대로 둔다.
 //   interface Badge { id: string; name: string; desc: string; icon: string; auto: boolean(earnedBadges 로 판정되는가) }
 //   BADGES: Badge[]
 //   earnedBadges(student: Student, rec?: SessionRecord): string[]   지금 조건을 만족하는 auto 배지 id 전부(이미 가진 것 포함)
@@ -38,6 +39,7 @@ import type { BattleRoom, SessionMode, SessionRecord, Student } from '../data/ty
 import { isHomeRowOnly, wordCount } from './hangul';
 import { getStage } from './stages';
 import { battleEvents, feverAt, FEVER_MULT, teamOf } from './events';
+import { CLASS_RP } from './classBattle';
 
 export const TIERS: { name: string; rp: number }[] = [
   { name: '훈련병', rp: 0 },
@@ -309,13 +311,12 @@ export function applySession(student: Student, rec: SessionRecord, now: Date, go
 
 export function applyBattle(
   student: Student,
-  r: { playerCount: number; place: number; score: number; practice?: boolean },
+  r: { playerCount: number; place: number; score: number; practice?: boolean; classBattle?: boolean },
 ): Partial<Student> {
-  const out: Partial<Student> = {
-    rp: (student.rp || 0) + rpGain(r.playerCount, r.place, r.score, r.practice),
-  };
-  // 컴퓨터 대결(practice)은 실제 배틀 전적(games·wins)에 넣지 않는다
-  if (!r.practice) {
+  const gain = r.classBattle ? (r.score >= 1 ? CLASS_RP : 0) : rpGain(r.playerCount, r.place, r.score, r.practice);
+  const out: Partial<Student> = { rp: (student.rp || 0) + gain };
+  // 컴퓨터 대결·학급 배틀은 실제 배틀 전적(games·wins)에 넣지 않는다
+  if (!r.practice && !r.classBattle) {
     out.games = (student.games || 0) + 1;
     if (r.place === 1 && r.score > 0 && r.playerCount >= 2) out.wins = (student.wins || 0) + 1;
   }

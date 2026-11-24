@@ -5,8 +5,9 @@
 //   모든 메서드는 내부 준비 Promise(ready)를 기다린 뒤 실행된다.
 // - Firestore: students, secrets(읽기 불가), links/{uid}(익명 uid → 학번), probes/{uid}(PIN 설정 여부 확인용),
 //   teachers, config/owner, invites, sessions, settings/global, content/{meta|partN},
-//   applicants/{memberId}(선생님 회원 가입 신청. 승인되면 students/{memberId}(teacher: true) + secrets 로 옮긴다)
-// - Realtime Database: presence/{sid}, rooms/{roomId}
+//   applicants/{memberId}(선생님 회원 가입 신청. 승인되면 students/{memberId}(teacher: true) + secrets 로 옮긴다),
+//   classBattles/{roomId}(학급 배틀 결과)
+// - Realtime Database: presence/{sid}, rooms/{roomId}(학급 방은 klass 가 붙고 tier = CLASS_TIER, 정원 CLASS_MAX_PLAYERS)
 // - 규칙 파일: 프로젝트 루트 firestore.rules, database.rules.json
 import type { FirebaseApp } from 'firebase/app';
 import type { Auth, User } from 'firebase/auth';
@@ -22,6 +23,7 @@ import {
   type AuthUser,
   type BattlePlayer,
   type BattleRoom,
+  type ClassBattleRecord,
   type FallSpeed,
   type ContentBundle,
   type Lang,
@@ -32,6 +34,7 @@ import {
   type TeacherApplicant,
 } from './types';
 import { isMemberId, memberIdOf, normalizeMemberName } from '../engine/member';
+import { CLASS_MAX_PLAYERS, CLASS_TIER, klassOf, normalizeClassDuration, parseKlass } from '../engine/classBattle';
 
 export interface FirebaseConfig {
   apiKey: string;
@@ -168,6 +171,31 @@ function toRoom(id: string, v: unknown): BattleRoom | null {
     freezes: objOf<{ at: number; ms: number }>(r.freezes),
     ...(r.fall && typeof r.fall === 'object' ? { fall: r.fall as FallSpeed } : {}),
     ...(r.mode === 'team' ? { mode: 'team' as const } : {}),
+    ...(typeof r.klass === 'string' && parseKlass(r.klass) ? { klass: r.klass } : {}),
+  };
+}
+
+/** 방 정원(학급 방은 CLASS_MAX_PLAYERS). 트랜잭션의 원시 값에도 쓴다 */
+function capOf(r: { klass?: unknown } | null | undefined): number {
+  return r && typeof r.klass === 'string' && r.klass ? CLASS_MAX_PLAYERS : BATTLE_MAX_PLAYERS;
+}
+
+/** Firestore 의 학급 배틀 문서 → ClassBattleRecord (숫자·배열 방어) */
+function toClassBattle(id: string, d: Record<string, unknown>): ClassBattleRecord {
+  const num = (x: unknown) => (Number.isFinite(Number(x)) ? Number(x) : 0);
+  const players = Array.isArray(d.players) ? d.players : [];
+  return {
+    id,
+    grade: num(d.grade),
+    classNo: num(d.classNo),
+    date: String(d.date ?? ''),
+    at: num(d.at),
+    lang: d.lang === 'en' ? 'en' : 'ko',
+    durationSec: num(d.durationSec),
+    total: num(d.total),
+    players: players
+      .filter((p): p is Record<string, unknown> => !!p && typeof p === 'object')
+      .map((p) => ({ id: String(p.id ?? ''), name: String(p.name ?? ''), score: num(p.score) })),
   };
 }
 
@@ -514,7 +542,7 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
         if (cur === null) return cur;
         if (cur.state !== 'waiting') return;
         const players = objOf<BattlePlayer>(cur.players);
-        if (!players[player.id] && Object.keys(players).length >= BATTLE_MAX_PLAYERS) return;
+        if (!players[player.id] && Object.keys(players).length >= capOf(cur)) return;
         players[player.id] = { ...player, online: true };
         if (!players[cur.host]) cur.host = player.id;
         cur.players = players;
@@ -543,6 +571,85 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
       cur.host = me;
       return cur;
     }).catch(() => undefined);
+  }
+
+  /** 대기 방에 들어가거나 새로 만든다. klass 가 있으면 학급 방(같은 klass 끼리), 없으면 일반 방(학급 방 제외). */
+  async function joinOrCreate(
+    fb: Fb,
+    tier: number,
+    lang: Lang,
+    me: BattlePlayer,
+    klass: string | null,
+    durationSec: number,
+  ): Promise<string> {
+    const { D, db } = fb;
+    const now = serverNow();
+    const cap = klass ? CLASS_MAX_PLAYERS : BATTLE_MAX_PLAYERS;
+    const player: BattlePlayer = clean({ ...me, joinedAt: now, online: true });
+    const snap = await D.get(D.query(D.ref(db, 'rooms'), D.orderByChild('tier'), D.equalTo(tier)));
+    const candidates = Object.entries(objOf<unknown>(snap.val()))
+      .map(([id, v]) => toRoom(id, v))
+      .filter(
+        (r): r is BattleRoom =>
+          !!r &&
+          (r.klass ?? null) === klass &&
+          r.lang === lang &&
+          r.state === 'waiting' &&
+          now - r.createdAt < HOUR &&
+          Object.keys(r.players).length > 0 &&
+          (Object.keys(r.players).length < cap || !!r.players[me.id]),
+      )
+      .sort((a, b) => Number(!!b.players[me.id]) - Number(!!a.players[me.id]) || a.createdAt - b.createdAt);
+
+    for (const r of candidates) {
+      try {
+        const res = await D.runTransaction(D.ref(db, `rooms/${r.id}`), (cur) => {
+          if (cur === null) return cur; // 서버 값 확인 유도
+          if (cur.state !== 'waiting') return;
+          const players = objOf<BattlePlayer>(cur.players);
+          if (players[me.id]) players[me.id] = { ...players[me.id], name: me.name, classNo: me.classNo, online: true };
+          else {
+            if (Object.keys(players).length >= capOf(cur)) return;
+            players[me.id] = player;
+          }
+          cur.players = players;
+          if (!cur.host || !players[cur.host]) cur.host = me.id;
+          return cur;
+        });
+        if (
+          res.committed &&
+          res.snapshot.exists() &&
+          res.snapshot.child('state').val() === 'waiting' &&
+          res.snapshot.child(`players/${me.id}`).exists()
+        ) {
+          await arm(fb, r.id, player, 'remove');
+          return r.id;
+        }
+      } catch {
+        // 다음 방 시도
+      }
+    }
+
+    const ref = D.push(D.ref(db, 'rooms'));
+    const id = ref.key as string;
+    const room: BattleRoom = {
+      id,
+      tier,
+      lang,
+      host: me.id,
+      state: 'waiting',
+      seed: 0,
+      startAt: 0,
+      durationSec,
+      startCount: 0,
+      createdAt: now,
+      players: { [me.id]: player },
+      claims: {},
+      ...(klass ? { klass } : {}),
+    };
+    await D.set(ref, clean(room));
+    await arm(fb, id, player, 'remove');
+    return id;
   }
 
   // ───────── Backend 객체 ─────────
@@ -1007,6 +1114,7 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
                   D.remove(D.ref(db, `rooms/${id}`)).catch(() => undefined); // 오래된 방 정리
                   continue;
                 }
+                if (tier !== CLASS_TIER && r.klass) continue; // 일반 로비에 학급 방이 섞이지 않게
                 if (r.lang === lang) out.push(r);
               }
               out.sort((a, b) => a.createdAt - b.createdAt);
@@ -1020,72 +1128,31 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
     },
 
     joinOrCreateRoom(tier, lang, me) {
+      return run((fb) => joinOrCreate(fb, tier, lang, me, null, BATTLE_DURATION_SEC));
+    },
+
+    joinOrCreateClassRoom(klass, lang, me, durationSec) {
       return run(async (fb) => {
-        const { D, db } = fb;
-        const now = serverNow();
-        const player: BattlePlayer = clean({ ...me, joinedAt: now, online: true });
-        const snap = await D.get(D.query(D.ref(db, 'rooms'), D.orderByChild('tier'), D.equalTo(tier)));
-        const candidates = Object.entries(objOf<unknown>(snap.val()))
-          .map(([id, v]) => toRoom(id, v))
-          .filter(
-            (r): r is BattleRoom =>
-              !!r &&
-              r.lang === lang &&
-              r.state === 'waiting' &&
-              now - r.createdAt < HOUR &&
-              Object.keys(r.players).length > 0 &&
-              (Object.keys(r.players).length < BATTLE_MAX_PLAYERS || !!r.players[me.id]),
-          )
-          .sort((a, b) => Number(!!b.players[me.id]) - Number(!!a.players[me.id]) || a.createdAt - b.createdAt);
+        const k = parseKlass(klass);
+        if (!k) throw new AppError('UNKNOWN', '학급 정보가 올바르지 않습니다.');
+        return joinOrCreate(fb, CLASS_TIER, lang, me, klassOf(k.grade, k.classNo), normalizeClassDuration(durationSec));
+      });
+    },
 
-        for (const r of candidates) {
-          try {
-            const res = await D.runTransaction(D.ref(db, `rooms/${r.id}`), (cur) => {
-              if (cur === null) return cur; // 서버 값 확인 유도
-              if (cur.state !== 'waiting') return;
-              const players = objOf<BattlePlayer>(cur.players);
-              if (players[me.id]) players[me.id] = { ...players[me.id], name: me.name, classNo: me.classNo, online: true };
-              else {
-                if (Object.keys(players).length >= BATTLE_MAX_PLAYERS) return;
-                players[me.id] = player;
-              }
-              cur.players = players;
-              if (!cur.host || !players[cur.host]) cur.host = me.id;
-              return cur;
-            });
-            if (
-              res.committed &&
-              res.snapshot.exists() &&
-              res.snapshot.child('state').val() === 'waiting' &&
-              res.snapshot.child(`players/${me.id}`).exists()
-            ) {
-              await arm(fb, r.id, player, 'remove');
-              return r.id;
-            }
-          } catch {
-            // 다음 방 시도
-          }
-        }
+    saveClassBattle(rec) {
+      return run(async (fb) => {
+        const { F, fs } = fb;
+        const data = toClassBattle(rec.id, rec as unknown as Record<string, unknown>);
+        await F.setDoc(F.doc(fs, 'classBattles', rec.id), clean(data));
+      });
+    },
 
-        const ref = D.push(D.ref(db, 'rooms'));
-        const id = ref.key as string;
-        const room: BattleRoom = {
-          id,
-          tier,
-          lang,
-          host: me.id,
-          state: 'waiting',
-          seed: 0,
-          startAt: 0,
-          durationSec: BATTLE_DURATION_SEC,
-          startCount: 0,
-          createdAt: now,
-          players: { [me.id]: player },
-          claims: {},
-        };
-        await D.set(ref, clean(room));
-        await arm(fb, id, player, 'remove');
-        return id;
+    listClassBattles(max) {
+      return run(async (fb) => {
+        const { F, fs } = fb;
+        const n = Math.max(1, Math.floor(max) || 1);
+        const snap = await F.getDocs(F.query(F.collection(fs, 'classBattles'), F.orderBy('at', 'desc'), F.limit(n)));
+        return snap.docs.map((d) => toClassBattle(d.id, d.data()));
       });
     },
 
@@ -1141,9 +1208,10 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
         if (!me) throw new AppError('PERMISSION', '학생으로 로그인해야 합니다.');
         const v = Math.max(10, Math.min(600, Math.round(sec) || BATTLE_DURATION_SEC));
         // durationSec 칸만 바꾼다(방 전체를 다시 쓰지 않음). 방장·대기 중이 아니면 그대로 둔다.
+        // 학급 방은 경기 시간이 교사 설정이라 바꾸지 않는다.
         const snap = await D.get(D.ref(db, `rooms/${roomId}`));
-        const cur = snap.val() as { host?: string; state?: string } | null;
-        if (!cur || cur.state !== 'waiting' || cur.host !== me) return;
+        const cur = snap.val() as { host?: string; state?: string; klass?: unknown } | null;
+        if (!cur || cur.state !== 'waiting' || cur.host !== me || cur.klass) return;
         await D.update(D.ref(db, `rooms/${roomId}`), { durationSec: v });
       });
     },
@@ -1154,8 +1222,8 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
         const me = myStudentId();
         if (!me) throw new AppError('PERMISSION', '학생으로 로그인해야 합니다.');
         const snap = await D.get(D.ref(db, `rooms/${roomId}`));
-        const cur = snap.val() as { host?: string; state?: string } | null;
-        if (!cur || cur.state !== 'waiting' || cur.host !== me) return;
+        const cur = snap.val() as { host?: string; state?: string; klass?: unknown } | null;
+        if (!cur || cur.state !== 'waiting' || cur.host !== me || cur.klass) return; // 학급 방은 팀전 없음
         await D.update(D.ref(db, `rooms/${roomId}`), { mode: mode === 'team' ? 'team' : 'ffa' });
       });
     },

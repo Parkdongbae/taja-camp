@@ -338,6 +338,15 @@ describe('applyBattle / earnedBadges', () => {
     expect(p.games).toBeUndefined();
     expect(p.wins).toBeUndefined();
   });
+  it('classBattle: 1점 이상이면 참여 점수 10, games·wins 그대로', () => {
+    const p = applyBattle(stu({ rp: 90, games: 3, wins: 1 }), { playerCount: 30, place: 1, score: 1, classBattle: true });
+    expect(p.rp).toBe(100);
+    expect(p.games).toBeUndefined();
+    expect(p.wins).toBeUndefined();
+  });
+  it('classBattle: 0점이면 rp 없음', () => {
+    expect(applyBattle(stu({ rp: 90 }), { playerCount: 30, place: 5, score: 0, classBattle: true }).rp).toBe(90);
+  });
   it('0점은 rp 없음, 승리 아님', () => {
     const p = applyBattle(stu(), { playerCount: 4, place: 1, score: 0 });
     expect(p.rp).toBe(0);

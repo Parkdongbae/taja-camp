@@ -1,9 +1,11 @@
 // 배틀 대기실. <BattleWaiting room meId onStart onLeave onDuration? starting error />
 // 방장만 [시작 Enter](2명 이상), [나가기 Esc]. 방장은 경기 시간(←/→ 또는 버튼, 기본 2분)과 경기 방식(↑/↓ 또는 버튼: 개인전·팀전)을 고른다.
 // 팀전이면 들어온 순서대로 홍팀·청팀을 번갈아 배정해 보여 준다.
+// room.klass 가 있으면 학급 배틀: 제목 "학급 배틀 · N학년 M반", 시간·방식은 바꿀 수 없고(표시만), 정원 CLASS_MAX_PLAYERS, 목록은 촘촘한 격자.
 import { useEffect } from 'react';
 import { BATTLE_MAX_PLAYERS, type BattleRoom } from '../../data/types';
 import { BATTLE_DURATIONS } from '../../engine/battle';
+import { CLASS_MAX_PLAYERS, parseKlass } from '../../engine/classBattle';
 import { tierName } from '../../engine/scoring';
 import { TEAM_NAMES, teamOf } from '../../engine/events';
 import { TierBadge } from '../TierBadge';
@@ -29,11 +31,14 @@ export function BattleWaiting({
   starting: boolean;
   error: string;
 }) {
+  const kl = parseKlass(room.klass);
+  const isClass = !!room.klass;
+  const maxPlayers = isClass ? CLASS_MAX_PLAYERS : BATTLE_MAX_PLAYERS;
   const players = Object.values(room.players ?? {}).sort((a, b) => a.joinedAt - b.joinedAt);
   const isHost = room.host === meId;
   const canStart = isHost && players.length >= 2 && !starting;
   const hostName = room.players?.[room.host]?.name ?? '';
-  const teamMode = room.mode === 'team';
+  const teamMode = !isClass && room.mode === 'team';
   const teams = teamOf(room.players);
   const durLabel = (sec: number) => (sec % 60 === 0 ? `${sec / 60}분` : `${Math.floor(sec / 60)}분 ${sec % 60}초`);
 
@@ -47,14 +52,14 @@ export function BattleWaiting({
       } else if (e.key === 'Escape') {
         e.preventDefault();
         onLeave();
-      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && isHost && onDuration) {
+      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && isHost && onDuration && !isClass) {
         // 방장: 경기 시간 바꾸기
         e.preventDefault();
         const list = BATTLE_DURATIONS as readonly number[];
         const i = Math.max(0, list.indexOf(room.durationSec));
         const j = Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowRight' ? 1 : -1)));
         if (list[j] !== room.durationSec) onDuration(list[j]);
-      } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && isHost && onMode) {
+      } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && isHost && onMode && !isClass) {
         // 방장: 개인전 ↔ 팀전
         e.preventDefault();
         onMode(teamMode ? 'ffa' : 'team');
@@ -62,29 +67,41 @@ export function BattleWaiting({
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [canStart, onStart, onLeave, isHost, onDuration, room.durationSec, onMode, teamMode]);
+  }, [canStart, onStart, onLeave, isHost, onDuration, room.durationSec, onMode, teamMode, isClass]);
 
   return (
     <div className="h-full bg-ink text-white">
       <div className="mx-auto flex h-full max-w-5xl flex-col gap-5 p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-black">⚔️ 배틀 대기실</h1>
-            <TierBadge tier={room.tier} large />
-            <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-bold">{LANG_LABEL[room.lang]}</span>
+            {isClass ? (
+              <h1 className="text-3xl font-black">
+                🏫 학급 배틀 · {kl ? `${kl.grade}학년 ${kl.classNo}반` : ''}
+              </h1>
+            ) : (
+              <>
+                <h1 className="text-3xl font-black">⚔️ 배틀 대기실</h1>
+                <TierBadge tier={room.tier} large />
+                <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-bold">{LANG_LABEL[room.lang]}</span>
+              </>
+            )}
           </div>
           <div className="text-2xl font-black tabular-nums">
-            참가 {players.length} <span className="text-white/40">/ {BATTLE_MAX_PLAYERS}</span>
+            참가 {players.length} <span className="text-white/40">/ {maxPlayers}</span>
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-4 content-start gap-3 overflow-auto rounded-2xl bg-white/5 p-5 ring-1 ring-white/10">
+        <div
+          className={`grid min-h-0 flex-1 content-start overflow-auto rounded-2xl bg-white/5 ring-1 ring-white/10 ${
+            isClass ? 'grid-cols-6 gap-1.5 p-3' : 'grid-cols-4 gap-3 p-5'
+          }`}
+        >
           {players.map((p) => {
             const me = p.id === meId;
             return (
               <div
                 key={p.id}
-                className={`anim-pop flex items-center justify-between rounded-xl px-4 py-3 ${
+                className={`anim-pop flex items-center justify-between rounded-xl ${isClass ? 'px-2.5 py-1.5 text-sm' : 'px-4 py-3'} ${
                   me ? 'bg-mint-500 text-white' : 'bg-white/10'
                 } ${p.online === false ? 'opacity-40' : ''} ${teamMode ? (teams[p.id] === 0 ? 'ring-4 ring-rose-500' : 'ring-4 ring-sky-500') : ''}`}
               >
@@ -93,17 +110,19 @@ export function BattleWaiting({
                     {p.name}
                     {me ? ' (나)' : ''}
                   </div>
-                  <div className={`text-xs ${me ? 'text-white/80' : 'text-white/50'}`}>
-                    {p.classNo}반{teamMode ? ` · ${TEAM_NAMES[teams[p.id] ?? 0]}` : ''}
-                  </div>
+                  {!isClass && (
+                    <div className={`text-xs ${me ? 'text-white/80' : 'text-white/50'}`}>
+                      {p.classNo}반{teamMode ? ` · ${TEAM_NAMES[teams[p.id] ?? 0]}` : ''}
+                    </div>
+                  )}
                 </div>
                 {p.id === room.host && (
-                  <span className="shrink-0 rounded-full bg-gold px-2 py-0.5 text-xs font-bold text-ink">👑 방장</span>
+                  <span className="shrink-0 rounded-full bg-gold px-2 py-0.5 text-xs font-bold text-ink">{isClass ? '👑' : '👑 방장'}</span>
                 )}
               </div>
             );
           })}
-          {Array.from({ length: Math.max(0, Math.min(4, BATTLE_MAX_PLAYERS - players.length)) }, (_, i) => (
+          {Array.from({ length: isClass ? 0 : Math.max(0, Math.min(4, maxPlayers - players.length)) }, (_, i) => (
             <div key={`empty${i}`} className="rounded-xl border-2 border-dashed border-white/10 px-4 py-3 text-sm text-white/30">
               빈 자리
             </div>
@@ -113,8 +132,9 @@ export function BattleWaiting({
         <div className="flex items-center justify-between rounded-2xl bg-white/5 px-6 py-4 ring-1 ring-white/10">
           <div className="text-sm text-white/70">
             <div>
-              방장: <b className="text-white">{hostName}</b> · {tierName(room.tier)} 방 · <b className="text-gold">{durLabel(room.durationSec)}</b> 경기
+              방장: <b className="text-white">{hostName}</b> · {isClass ? '우리 반 모두' : `${tierName(room.tier)} 방`} · <b className="text-gold">{durLabel(room.durationSec)}</b> 경기{isClass ? ' (선생님이 정한 시간)' : ''}
             </div>
+            {!isClass && (
             <div className="mt-2 flex items-center gap-1.5">
               <span className="mr-1 text-white/50">경기 방식</span>
               {(['ffa', 'team'] as const).map((m) => {
@@ -142,6 +162,8 @@ export function BattleWaiting({
                 </span>
               )}
             </div>
+            )}
+            {!isClass && (
             <div className="mt-2 flex items-center gap-1.5">
               <span className="mr-1 text-white/50">경기 시간</span>
               {BATTLE_DURATIONS.map((sec) => {
@@ -168,10 +190,11 @@ export function BattleWaiting({
                 </span>
               )}
             </div>
+            )}
             <div className="mt-1 text-white/50">
               {isHost
                 ? players.length >= 2
-                  ? '모두 모이면 시작을 누르세요. 16명이 차면 자동으로 시작해요.'
+                  ? `모두 모이면 시작을 누르세요. ${maxPlayers}명이 차면 자동으로 시작해요.`
                   : '친구가 들어오면 시작할 수 있어요.'
                 : '방장이 시작하기를 기다리는 중...'}
             </div>

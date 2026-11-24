@@ -7,6 +7,7 @@
 // - 선생님 회원: 성함 + PIN 으로 신청(applicants) → 관리자 승인 시 students(teacher: true) + secrets 로 옮긴다.
 // - 방 변경·낱말 선점은 Web Locks API(navigator.locks)가 있으면 탭 간 잠금으로 원자성을 확보한다.
 // - 탭을 닫으면(pagehide) 접속 현황에서 빠지고, 대기방에서는 나가며, 경기 중이면 online=false.
+// - 학급 배틀: 방에 klass 가 붙고 tier = CLASS_TIER, 정원 CLASS_MAX_PLAYERS. 결과는 classBattles(id → 기록).
 import type { Backend, Unsub } from './backend';
 import {
   AppError,
@@ -17,6 +18,7 @@ import {
   type AuthUser,
   type BattlePlayer,
   type BattleRoom,
+  type ClassBattleRecord,
   type ContentBundle,
   type Presence,
   type SessionRecord,
@@ -25,6 +27,7 @@ import {
   type TeacherApplicant,
 } from './types';
 import { isMemberId, memberIdOf, normalizeMemberName } from '../engine/member';
+import { CLASS_MAX_PLAYERS, CLASS_TIER, klassOf, normalizeClassDuration, parseKlass } from '../engine/classBattle';
 
 const P = 'taja.demo.';
 const K = {
@@ -38,12 +41,14 @@ const K = {
   content: P + 'content',
   presence: P + 'presence',
   rooms: P + 'rooms',
+  classBattles: P + 'classBattles',
 } as const;
 const AUTH_KEY = P + 'auth';
 const HOUR = 60 * 60 * 1000;
 const PRESENCE_TTL = 30_000;
 const BEAT_MS = 10_000;
 const MAX_SESSIONS = 5000;
+const MAX_CLASS_BATTLES = 2000;
 
 const DEMO_STUDENTS: [string, string][] = [
   ['1101', '김민준'],
@@ -290,6 +295,53 @@ export function createLocalBackend(): Backend {
       const empty = r.state === 'waiting' && Object.keys(r.players ?? {}).length === 0;
       if (now - r.createdAt > HOUR || empty) delete rs[id];
     }
+  }
+
+  /** 대기 방에 들어가거나 새로 만든다. klass 가 있으면 학급 방(같은 klass 끼리), 없으면 일반 방(학급 방 제외). */
+  function joinOrCreateIn(
+    rs: Record<string, BattleRoom>,
+    tier: number,
+    lang: BattleRoom['lang'],
+    meP: BattlePlayer,
+    klass: string | null,
+    durationSec: number,
+  ): string {
+    const player: BattlePlayer = clone({ ...meP, joinedAt: Date.now(), online: true });
+    const cap = klass ? CLASS_MAX_PLAYERS : BATTLE_MAX_PLAYERS;
+    purgeRooms(rs);
+    const candidates = Object.values(rs)
+      .filter(
+        (r) =>
+          r.tier === tier &&
+          (r.klass ?? null) === klass &&
+          r.lang === lang &&
+          r.state === 'waiting' &&
+          (Object.keys(r.players).length < cap || !!r.players[meP.id]),
+      )
+      .sort((a, b) => Number(!!b.players[meP.id]) - Number(!!a.players[meP.id]) || a.createdAt - b.createdAt);
+    const r = candidates[0];
+    if (r) {
+      r.players[meP.id] = r.players[meP.id] ? { ...r.players[meP.id], online: true } : player;
+      if (!r.players[r.host]) r.host = meP.id;
+      return r.id;
+    }
+    const nid = randomId('room-');
+    rs[nid] = {
+      id: nid,
+      tier,
+      lang,
+      host: meP.id,
+      state: 'waiting',
+      seed: 0,
+      startAt: 0,
+      durationSec,
+      startCount: 0,
+      createdAt: Date.now(),
+      players: { [meP.id]: player },
+      claims: {},
+      ...(klass ? { klass } : {}),
+    };
+    return nid;
   }
 
   /** 대기방에서 빼거나(방장 이양·빈 방 삭제), 경기 중이면 online=false */
@@ -692,6 +744,7 @@ export function createLocalBackend(): Backend {
             .filter(
               (r) =>
                 r.tier === tier &&
+                (tier === CLASS_TIER || !r.klass) && // 일반 로비에 학급 방이 섞이지 않게
                 r.lang === lang &&
                 now - r.createdAt <= HOUR &&
                 !(r.state === 'waiting' && Object.keys(r.players ?? {}).length === 0),
@@ -704,43 +757,34 @@ export function createLocalBackend(): Backend {
     },
 
     async joinOrCreateRoom(tier, lang, meP) {
-      const player: BattlePlayer = clone({ ...meP, joinedAt: Date.now(), online: true });
-      const id = await roomLock((rs) => {
-        purgeRooms(rs);
-        const candidates = Object.values(rs)
-          .filter(
-            (r) =>
-              r.tier === tier &&
-              r.lang === lang &&
-              r.state === 'waiting' &&
-              (Object.keys(r.players).length < BATTLE_MAX_PLAYERS || !!r.players[meP.id]),
-          )
-          .sort((a, b) => Number(!!b.players[meP.id]) - Number(!!a.players[meP.id]) || a.createdAt - b.createdAt);
-        const r = candidates[0];
-        if (r) {
-          r.players[meP.id] = r.players[meP.id] ? { ...r.players[meP.id], online: true } : player;
-          if (!r.players[r.host]) r.host = meP.id;
-          return r.id;
-        }
-        const nid = randomId('room-');
-        rs[nid] = {
-          id: nid,
-          tier,
-          lang,
-          host: meP.id,
-          state: 'waiting',
-          seed: 0,
-          startAt: 0,
-          durationSec: BATTLE_DURATION_SEC,
-          startCount: 0,
-          createdAt: Date.now(),
-          players: { [meP.id]: player },
-          claims: {},
-        };
-        return nid;
-      });
+      const id = await roomLock((rs) => joinOrCreateIn(rs, tier, lang, meP, null, BATTLE_DURATION_SEC));
       myRooms.set(id, meP.id);
       return id;
+    },
+
+    async joinOrCreateClassRoom(klass, lang, meP, durationSec) {
+      const k = parseKlass(klass);
+      if (!k) throw new AppError('UNKNOWN', '학급 정보가 올바르지 않습니다.');
+      const kl = klassOf(k.grade, k.classNo);
+      const id = await roomLock((rs) => joinOrCreateIn(rs, CLASS_TIER, lang, meP, kl, normalizeClassDuration(durationSec)));
+      myRooms.set(id, meP.id);
+      return id;
+    },
+
+    async saveClassBattle(rec) {
+      requireSignedIn();
+      const all = read<Record<string, ClassBattleRecord>>(K.classBattles, {});
+      all[rec.id] = clone(rec);
+      // 오래된 것부터 버려 저장 공간을 지킨다
+      const ids = Object.values(all).sort((a, b) => b.at - a.at).map((r) => r.id);
+      for (const id of ids.slice(MAX_CLASS_BATTLES)) delete all[id];
+      write(K.classBattles, all);
+    },
+
+    async listClassBattles(max) {
+      return Object.values(read<Record<string, ClassBattleRecord>>(K.classBattles, {}))
+        .sort((a, b) => b.at - a.at)
+        .slice(0, Math.max(0, Math.floor(max) || 0));
     },
 
     async leaveRoom(roomId, playerId) {
@@ -757,7 +801,7 @@ export function createLocalBackend(): Backend {
       const myId = u && u.role === 'student' ? u.studentId : null;
       await roomLock((rs) => {
         const r = rs[roomId];
-        if (!r || r.state !== 'waiting' || r.host !== myId) return;
+        if (!r || r.state !== 'waiting' || r.host !== myId || r.klass) return; // 학급 방은 교사 설정 시간
         r.durationSec = Math.max(10, Math.min(600, Math.round(sec) || BATTLE_DURATION_SEC));
       });
     },
@@ -767,7 +811,7 @@ export function createLocalBackend(): Backend {
       const myId = u && u.role === 'student' ? u.studentId : null;
       await roomLock((rs) => {
         const r = rs[roomId];
-        if (!r || r.state !== 'waiting' || r.host !== myId) return;
+        if (!r || r.state !== 'waiting' || r.host !== myId || r.klass) return; // 학급 방은 팀전 없음
         r.mode = mode === 'team' ? 'team' : 'ffa';
       });
     },

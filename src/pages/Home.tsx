@@ -1,13 +1,16 @@
 // 홈 대시보드: 이어서 하기, 연습 메뉴, 배틀·순위·내 기록, 키보드 종류 설정.
+// 학급 배틀 카드: 우리 반 최근 결과(총점·참여 학생·반 등수). 선생님 회원에게는 반별 최고 총점 표.
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { backend } from '../data';
-import { KEYBOARD_LABEL, type KeyboardKind } from '../data/types';
+import { KEYBOARD_LABEL, type ClassBattleRecord, type KeyboardKind } from '../data/types';
 import { useAuth } from '../state/auth';
 import { usePrefs } from '../state/prefs';
 import { useContent } from '../content';
 import { getStage, isBattleUnlocked, nextStageId } from '../engine/stages';
 import { levelOf, tierProgress, todayString } from '../engine/scoring';
+import { isMemberId } from '../engine/member';
+import { classStandings, dateLabel, latestOfClass } from '../engine/classBattle';
 import { TierBadge } from '../components/TierBadge';
 import { Card, Kbd } from '../components/ui';
 import { POSITION_TOTAL } from '../components/AppShell';
@@ -19,8 +22,21 @@ export default function Home() {
   const prefs = usePrefs();
   const content = useContent();
   const [online, setOnline] = useState(0);
+  const [classRecs, setClassRecs] = useState<ClassBattleRecord[] | null>(null);
 
   useEffect(() => backend.watchPresence((list) => setOnline(list.length)), []);
+
+  // 학급 배틀 결과는 한 번만 불러온다(실패하면 카드를 숨김)
+  useEffect(() => {
+    let off = false;
+    backend
+      .listClassBattles(100)
+      .then((l) => !off && setClassRecs(l))
+      .catch(() => undefined);
+    return () => {
+      off = true;
+    };
+  }, []);
 
   // 다음에 할 일: 자리연습이 남았으면 그 단계, 아니면 낱말연습
   const nextKo = student ? (nextStageId(student.position, 'ko') ?? nextStageId(student.position, 'symbol')) : null;
@@ -43,6 +59,12 @@ export default function Home() {
   const tp = tierProgress(student.rp);
   const goalDone = student.lastDay === todayString() && student.todaySeconds >= settings.dailyGoalMinutes * 60;
   const level = levelOf(student.xp);
+  const isTeacher = !!student.teacher || isMemberId(student.id);
+  const hasClass = !isTeacher && student.grade > 0 && student.classNo > 0;
+  const classOn = !!settings.classBattle && hasClass; // 학급 배틀로 들어갈 수 있는가
+  const standings = classRecs ? classStandings(classRecs) : [];
+  const myLatest = hasClass && classRecs ? latestOfClass(classRecs, student.grade, student.classNo) : null;
+  const myStanding = standings.find((c) => c.grade === student.grade && c.classNo === student.classNo);
 
   const menu = [
     // 선생님에게만 보이는 항목(자리연습 앞)
@@ -118,11 +140,13 @@ export default function Home() {
 
       <div className="grid grid-cols-3 gap-4">
         {/* 배틀 */}
-        {unlocked && settings.battleEnabled ? (
+        {(unlocked && settings.battleEnabled) || classOn ? (
           <Link to="/battle" className="rounded-2xl bg-ink p-5 text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="text-3xl">⚔️</div>
             <div className="mt-2 text-xl font-black">배틀 모드</div>
-            <div className="mt-1 text-sm opacity-70">지금 접속 {online}명 · {tp.name} 방</div>
+            <div className="mt-1 text-sm opacity-70">
+              지금 접속 {online}명 · {unlocked && settings.battleEnabled ? `${tp.name} 방` : '🏫 학급 배틀만 열려 있어요'}
+            </div>
           </Link>
         ) : (
           <div className="rounded-2xl bg-ink/10 p-5 text-ink/60">
@@ -146,6 +170,60 @@ export default function Home() {
           </div>
         </Link>
       </div>
+
+      {/* 학급 배틀 */}
+      {isTeacher
+        ? standings.length > 0 && (
+            <Card>
+              <div className="font-bold">🏫 학급 배틀 · 반별 최고 총점</div>
+              <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+                {standings.map((c) => (
+                  <div key={`${c.grade}-${c.classNo}`} className="flex items-center gap-3 rounded-lg bg-mint-50 px-3 py-1.5">
+                    <span className="w-6 text-center font-bold tabular-nums text-ink/50">{c.place}</span>
+                    <span className="flex-1 font-bold">
+                      {c.grade}학년 {c.classNo}반
+                    </span>
+                    <span className="text-xs text-ink/50">{dateLabel(c.date)}</span>
+                    <span className="w-20 text-right font-black tabular-nums">{c.best.toLocaleString()}점</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )
+        : hasClass &&
+          (myLatest || settings.classBattle) && (
+            <Card className="ring-2 ring-gold/40">
+              {myLatest ? (
+                <>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div className="font-black">
+                      🏫 학급 배틀 · {dateLabel(myLatest.date)} · 총점{' '}
+                      <span className="text-xl tabular-nums text-mint-700">{myLatest.total.toLocaleString()}점</span> · 참여 {myLatest.players.length}명
+                    </div>
+                    {myStanding && (
+                      <div className="text-sm font-bold text-ink/60">
+                        전체 {standings.length}개 반 중 {myStanding.place}등
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-3 flex max-h-28 flex-wrap gap-1.5 overflow-auto text-sm">
+                    {myLatest.players.map((p) => (
+                      <span
+                        key={p.id}
+                        className={`rounded-full px-3 py-0.5 ${p.id === student.id ? 'bg-gold font-black text-ink' : 'bg-mint-50 text-ink/80'}`}
+                      >
+                        {p.name} <span className="text-xs opacity-60">{p.score}</span>
+                      </span>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm text-ink/70">
+                  <b>🏫 학급 배틀</b> · 아직 우리 반 기록이 없어요. 배틀 모드에서 학급 배틀에 참여해 보세요.
+                </div>
+              )}
+            </Card>
+          )}
 
       <div className="grid grid-cols-2 gap-4">
         {/* 계급 */}

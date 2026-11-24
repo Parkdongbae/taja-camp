@@ -9,3 +9,4 @@ export * from './events';
 export * from './awards';
 export { randInt, shuffle, seedFromString } from './rng';
 export * from './member';
+export * from './classBattle';

@@ -172,6 +172,10 @@ export interface Settings {
   fallSpeed?: FallSpeed;
   /** 연습·배틀에 낼 콘텐츠("과목|단원" 키 목록, content/pick 의 pickKey). 비어 있거나 없으면 전체 */
   contentPick?: string[];
+  /** 학급 배틀: 켜면 배틀 화면에 '학급 배틀'이 보인다(같은 반 모두가 한 방, 반 총점 기록). 옛 문서에는 없을 수 있다 */
+  classBattle?: boolean;
+  /** 학급 배틀 경기 시간(초). 기본 300 */
+  classBattleSec?: number;
 }
 export const DEFAULT_SETTINGS: Settings = {
   battleEnabled: true,
@@ -189,6 +193,8 @@ export const DEFAULT_SETTINGS: Settings = {
   badWordsExtra: [],
   fallSpeed: DEFAULT_FALL_SPEED,
   contentPick: [],
+  classBattle: false,
+  classBattleSec: 300,
 };
 
 // ───────── 인증 ─────────
@@ -260,6 +266,21 @@ export interface BattleRoom {
   mode?: 'ffa' | 'team';
   /** 이 판의 점수별 낙하 속도(%). 시작할 때 설정에서 복사(모든 참가자가 같은 일정을 만들기 위해). 없으면 100 */
   fall?: FallSpeed;
+  /** 학급 배틀 방이면 "학년반"(예: 1학년 3반 = "13"). tier 는 CLASS_TIER 로 고정. 없으면 일반 방 */
+  klass?: string;
+}
+
+/** 학급 배틀 한 판의 결과(반 총점·참여 학생). 문서 id = 방 id */
+export interface ClassBattleRecord {
+  id: string;
+  grade: number;
+  classNo: number;
+  date: string; // "YYYY-MM-DD"
+  at: number; // 끝난 시각(ms)
+  lang: Lang;
+  durationSec: number;
+  total: number; // 참여 학생 점수 합
+  players: { id: string; name: string; score: number }[];
 }
 export const BATTLE_MAX_PLAYERS = 16;
 export const BATTLE_DURATION_SEC = 120;

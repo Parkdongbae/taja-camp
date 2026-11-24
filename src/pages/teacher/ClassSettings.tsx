@@ -1,13 +1,15 @@
 // 수업 설정: backend.watchSettings 로 읽고, 바꾸면 바로 updateSettings 로 저장한다.
 // 배틀 멈추기(문장·초)와 바른 말(욕설 제재 켜기·초·추가 낱말)도 여기서 정한다.
+// 학급 배틀: 켜기·끄기(classBattle), 경기 시간(classBattleSec), 최근 기록 표.
 // 연습·배틀 콘텐츠: 과목·단원을 여러 개 골라 Settings.contentPick 에 저장한다(모두 고르거나 하나도 안 고르면 전체 = 빈 목록).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { backend } from '../../data';
-import { AppError, DEFAULT_SETTINGS, SUBJECT_LABEL, type Settings, type Subject } from '../../data/types';
+import { AppError, DEFAULT_SETTINGS, SUBJECT_LABEL, type ClassBattleRecord, type Settings, type Subject } from '../../data/types';
 import { useContent } from '../../content';
 import { contentGroups, type ContentGroup } from '../../content/pick';
 import { Card } from '../../components/ui';
 import { BAD_WORD_COUNT, findBadWord, squash } from '../../engine/badwords';
+import { CLASS_DURATIONS, dateLabel, normalizeClassDuration } from '../../engine/classBattle';
 import { FALL_SPEED_MAX, FALL_SPEED_MIN, fallMsAt, normalizeFallSpeed } from '../../engine/battle';
 
 function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
@@ -285,6 +287,49 @@ function BadWords({ extra, onChange }: { extra: string[]; onChange: (list: strin
   );
 }
 
+// 최근 학급 배틀 기록(불러오지 못하면 아무것도 보이지 않는다)
+function ClassBattleLog() {
+  const [list, setList] = useState<ClassBattleRecord[]>([]);
+  useEffect(() => {
+    let off = false;
+    backend
+      .listClassBattles(30)
+      .then((l) => !off && setList([...l].sort((a, b) => b.at - a.at).slice(0, 10)))
+      .catch(() => undefined);
+    return () => {
+      off = true;
+    };
+  }, []);
+  if (list.length === 0) return null;
+  return (
+    <div className="mt-3 border-t border-mint-100 pt-3">
+      <div className="mb-2 text-sm font-bold">최근 학급 배틀 기록</div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs text-ink/50">
+            <th className="py-1 font-normal">날짜</th>
+            <th className="font-normal">반</th>
+            <th className="text-right font-normal">총점</th>
+            <th className="text-right font-normal">참여</th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.map((r) => (
+            <tr key={r.id} className="border-t border-mint-100">
+              <td className="py-1.5">{dateLabel(r.date)}</td>
+              <td>
+                {r.grade}학년 {r.classNo}반
+              </td>
+              <td className="text-right font-bold tabular-nums">{r.total.toLocaleString()}점</td>
+              <td className="text-right tabular-nums">{r.players.length}명</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function ClassSettings() {
   const [s, setS] = useState<Settings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
@@ -357,6 +402,36 @@ export default function ClassSettings() {
         <Row title="소리 허용" desc="타건음과 배틀 효과음. 끄면 학생이 소리를 켤 수 없어요.">
           <Toggle label="소리 허용" on={s.soundAllowed} onChange={(v) => void save({ soundAllowed: v })} />
         </Row>
+      </Card>
+
+      <h2 className="pt-2 text-lg font-black">학급 배틀</h2>
+      <Card className={loaded ? '' : 'opacity-60'}>
+        <Row
+          title="학급 배틀 켜기"
+          desc="켜면 학생의 배틀 화면에 '학급 배틀'이 보입니다. 같은 반 학생이 모두 한 방에 들어가 함께 치고, 반 총점과 참여 학생이 기록됩니다. 먼저 들어온 학생이 시작합니다."
+        >
+          <Toggle label="학급 배틀" on={!!s.classBattle} onChange={(v) => void save({ classBattle: v })} />
+        </Row>
+        <Row title="경기 시간" desc="학급 배틀 한 판의 길이(기본 5분). 다음에 만드는 방부터 적용돼요.">
+          <div className="flex gap-1.5">
+            {CLASS_DURATIONS.map((sec) => {
+              const on = normalizeClassDuration(s.classBattleSec) === sec;
+              return (
+                <button
+                  key={sec}
+                  aria-pressed={on}
+                  onClick={() => void save({ classBattleSec: sec })}
+                  className={`shrink-0 whitespace-nowrap rounded-xl border-2 px-3 py-1.5 text-sm font-bold transition ${
+                    on ? 'border-mint-500 bg-mint-50 text-mint-700' : 'border-mint-100 text-ink/60 hover:border-mint-300'
+                  }`}
+                >
+                  {sec / 60}분
+                </button>
+              );
+            })}
+          </div>
+        </Row>
+        <ClassBattleLog />
       </Card>
 
       <h2 className="pt-2 text-lg font-black">연습·배틀 콘텐츠</h2>

@@ -2,9 +2,11 @@
 //   finishSession(rec, extra?) → { isBest, xpGain, newBadges, goalJustDone, promoted, prevBest }
 //   finishBattle(result)       → { rpGain, tierBefore, tierAfter, xpGain, newBadges, solo? }
 //     practice(컴퓨터 대결)면 RP 절반, 실제 전적(games·wins) 제외, solo(수준·전적) 갱신
+//     classBattle(학급 배틀)이면 RP 는 점수 1 이상일 때 참여 점수, games·wins 제외
 import { backend } from '../data';
 import type { SessionRecord, Student } from '../data/types';
 import { applyBattle, applySession, rpGain, tierOf, todayString } from '../engine/scoring';
+import { CLASS_RP } from '../engine/classBattle';
 import { applySolo } from '../engine/bots';
 import { useAuth } from './auth';
 
@@ -86,6 +88,8 @@ export async function finishBattle(r: {
   seconds: number;
   lang: 'ko' | 'en';
   practice?: boolean;
+  /** 학급 배틀: RP 는 점수 1 이상이면 참여 점수(CLASS_RP), games·wins 는 올리지 않음 */
+  classBattle?: boolean;
 }): Promise<BattleFinish> {
   const { student, settings } = useAuth.getState();
   if (!student) throw new Error('로그인이 필요합니다.');
@@ -111,7 +115,7 @@ export async function finishBattle(r: {
   // 컴퓨터 대결: 다음 판 수준(solo.level)·전적을 같은 쓰기에 넣는다
   const soloBefore = { level: student.solo?.level ?? 0, wins: student.solo?.wins ?? 0, games: student.solo?.games ?? 0 };
   if (r.practice) patch.solo = applySolo(student.solo, r.place);
-  const gain = rpGain(r.playerCount, r.place, r.score, r.practice);
+  const gain = r.classBattle ? (r.score >= 1 ? CLASS_RP : 0) : rpGain(r.playerCount, r.place, r.score, r.practice);
   const after: Student = { ...student, ...patch };
   try {
     await Promise.all([backend.addSession(rec), backend.updateStudent(student.id, clean(patch))]);

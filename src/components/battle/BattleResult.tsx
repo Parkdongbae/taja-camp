@@ -5,12 +5,16 @@
 // - extra(res) 는 순위표 위에 덧붙일 내용(컴퓨터 대결의 다음 수준 안내 등).
 // - 팀전이면 팀 점수와 이긴 팀, 그리고 칭호(engine/awards.battleAwards: 속사포·협동왕·막판 스퍼트 등)를 보여 준다.
 // - 계급이 오르면 진급 축하 창.
+// - 학급 배틀(room.klass): 맨 위에 반 총점·참여 인원, 참가자마다 한 번 backend.saveClassBattle(classBattleRecord), 반별 순위에서 우리 반 등수,
+//   RP 칸은 "참여 점수". againLabel 로 [한 판 더] 버튼 글자를 바꾼다.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { BattleRoom } from '../../data/types';
+import { backend } from '../../data';
+import type { BattleRoom, ClassBattleRecord } from '../../data/types';
 import type { FallingWord } from '../../engine/battle';
 import { rankPlayers, teamScores, tierName, tierProgress, type BattleRank } from '../../engine/scoring';
 import { battleAwards } from '../../engine/awards';
 import { TEAM_NAMES } from '../../engine/events';
+import { classBattleRecord, classStandings, parseKlass } from '../../engine/classBattle';
 import { useAuth } from '../../state/auth';
 import type { BattleFinish } from '../../state/record';
 import { TierBadge } from '../TierBadge';
@@ -20,6 +24,7 @@ import { playDone, playFanfare } from '../sound';
 const MEDAL = ['🥇', '🥈', '🥉'];
 const SETTLE_MS = 800; // 끝 무렵 선점이 다 도착하도록 잠시 기다린 뒤 정산
 const inflight = new Map<string, Promise<BattleFinish>>();
+const classSaved = new Set<string>(); // 학급 배틀 기록을 이미 저장한 (방, 학번)
 
 type Reward = { kind: 'fresh' | 'stored'; res: BattleFinish } | { kind: 'saved' } | { kind: 'error' } | null;
 
@@ -48,6 +53,7 @@ export function BattleResult({
   onAgain,
   onExit,
   exitLabel = '나가기',
+  againLabel = '한 판 더',
   extra,
 }: {
   room: BattleRoom;
@@ -58,13 +64,16 @@ export function BattleResult({
   onAgain: () => void;
   onExit: () => void;
   exitLabel?: string;
+  againLabel?: string;
   extra?: (res: BattleFinish | null) => ReactNode;
 }) {
   const student = useAuth((s) => s.student);
   const ranks = useMemo(() => rankPlayers(room, schedule), [room, schedule]);
   const mine = ranks.find((r) => r.id === meId);
   const awards = useMemo(() => battleAwards(room, schedule), [room, schedule]);
-  const teamMode = room.mode === 'team';
+  const isClass = !!room.klass;
+  const kl = parseKlass(room.klass);
+  const teamMode = !isClass && room.mode === 'team';
   const teamPts = teamScores(ranks);
   const [reward, setReward] = useState<Reward>(null);
   const [promoClosed, setPromoClosed] = useState(false);
@@ -112,6 +121,50 @@ export function BattleResult({
     };
   }, [settleKey, meId]);
 
+  // 학급 배틀: 결과를 확정할 때 참가자마다 한 번 반 기록을 저장하고, 반별 순위에서 우리 반 등수를 구한다
+  const [classPlace, setClassPlace] = useState<{ place: number; of: number } | null>(null);
+  useEffect(() => {
+    if (!isClass) return;
+    let cancelled = false;
+    const key = `${room.id}:${meId}`;
+    const timer = window.setTimeout(() => {
+      const r = roomRef.current;
+      const rec: ClassBattleRecord | null = classBattleRecord(r, rankPlayers(r, schedRef.current), backend.serverNow());
+      if (!rec) return;
+      let already = classSaved.has(key);
+      try {
+        already = already || !!sessionStorage.getItem('classbattle:' + key);
+      } catch {
+        // 무시
+      }
+      const saving = already
+        ? Promise.resolve()
+        : (() => {
+            classSaved.add(key);
+            try {
+              sessionStorage.setItem('classbattle:' + key, '1');
+            } catch {
+              // 무시
+            }
+            return backend.saveClassBattle(rec).catch(() => undefined); // 실패는 조용히 무시
+          })();
+      void saving
+        .then(() => backend.listClassBattles(100))
+        .then((list) => {
+          if (cancelled) return;
+          const all = list.some((x) => x.id === rec.id) ? list : [...list, rec];
+          const st = classStandings(all);
+          const mine = st.find((c) => c.grade === rec.grade && c.classNo === rec.classNo);
+          if (mine) setClassPlace({ place: mine.place, of: st.length });
+        })
+        .catch(() => undefined);
+    }, SETTLE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isClass, room.id, meId]);
+
   // 결과가 처음 나올 때 한 번: 1등이면 팡파르, 아니면 맑은 "딩"
   const fresh = reward?.kind === 'fresh';
   const placeRef = useRef(mine?.place);
@@ -153,8 +206,21 @@ export function BattleResult({
 
   return (
     <div className="h-full bg-ink text-white">
-      <div className="mx-auto flex h-full max-w-5xl flex-col gap-5 p-6">
-        <div className="grid grid-cols-3 gap-5">
+      <div className={`mx-auto flex h-full max-w-5xl flex-col ${isClass ? 'gap-3 p-4' : 'gap-5 p-6'}`}>
+        {isClass && (
+          <div className="anim-pop shrink-0 rounded-2xl bg-gold px-6 py-4 text-center text-ink shadow-lg">
+            <div className="text-3xl font-black tabular-nums">
+              {kl ? `${kl.grade}학년 ${kl.classNo}반` : '우리 반'} 총점 {ranks.reduce((a, r) => a + r.score, 0).toLocaleString()}점
+              <span className="text-xl"> · 참여 {ranks.length}명</span>
+            </div>
+            {classPlace && (
+              <div className="mt-1 text-sm font-bold opacity-80">
+                반별 최고 총점 순위: 전체 {classPlace.of}개 반 중 {classPlace.place}등
+              </div>
+            )}
+          </div>
+        )}
+        <div className={`grid shrink-0 grid-cols-3 ${isClass ? 'gap-3 [&>div]:!p-3' : 'gap-5'}`}>
           <div className="anim-pop rounded-2xl bg-white/5 p-6 text-center ring-1 ring-white/10">
             <div className="text-sm text-white/50">내 순위</div>
             <div className="mt-1 text-5xl font-black">
@@ -170,9 +236,9 @@ export function BattleResult({
             <div className="text-sm text-white/50">획득</div>
             {res ? (
               <>
-                <div className="mt-1 text-4xl font-black text-gold">RP +{res.rpGain}</div>
+                <div className="mt-1 text-4xl font-black text-gold">{isClass ? `참여 점수 +${res.rpGain}` : `RP +${res.rpGain}`}</div>
                 <div className="mt-2 text-white/70">경험치 +{res.xpGain}</div>
-                {res.rpGain === 0 && <div className="mt-1 text-xs text-white/40">1점 이상 얻어야 RP 를 받아요</div>}
+                {res.rpGain === 0 && <div className="mt-1 text-xs text-white/40">{isClass ? '1점 이상 얻어야 참여 점수를 받아요' : '1점 이상 얻어야 RP 를 받아요'}</div>}
                 {res.newBadges.length > 0 && <div className="mt-1 text-xs text-gold">새 배지 {res.newBadges.length}개!</div>}
               </>
             ) : reward?.kind === 'saved' ? (
@@ -243,7 +309,7 @@ export function BattleResult({
 
         <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-white/5 p-5 ring-1 ring-white/10">
           <div className="mb-3 font-bold">최종 순위</div>
-          <ol className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+          <ol className={isClass ? 'grid grid-cols-3 gap-x-3 gap-y-1 text-sm' : 'grid grid-cols-2 gap-x-6 gap-y-1.5'}>
             {ranks.map((r) => {
               const me = r.id === meId;
               return (
@@ -267,7 +333,7 @@ export function BattleResult({
 
         <div className="flex justify-center gap-3">
           <Btn onClick={onAgain}>
-            한 판 더 <Kbd>Enter</Kbd>
+            {againLabel} <Kbd>Enter</Kbd>
           </Btn>
           <Btn variant="ghost" onClick={onExit}>
             {exitLabel} <Kbd>Esc</Kbd>

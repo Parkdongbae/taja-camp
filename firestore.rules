@@ -7,6 +7,7 @@ rules_version = '2';
 // - 선생님 회원: 성함 + PIN 으로 applicants/{t+16진수9자} 에 신청 → 관리자(owner)가 승인하면
 //   students/{같은 id}(teacher: true) + secrets 를 한 배치로 만든다. 승인 전에는 students 문서가 없어 links 를 못 만든다.
 //   teacher 표시는 owner 만 바꿀 수 있다(본인·일반 교사 불가).
+// - 학급 배틀 결과: classBattles/{방 id}. 같은 반 학생(본인 students 문서의 학년·반이 같음)만 쓰고, 회원 누구나 읽는다.
 // - 알려진 한계: PIN 무차별 대입을 막을 서버 측 횟수 제한이 없다(익명 계정을 새로 만들어 반복 시도 가능).
 
 service cloud.firestore {
@@ -145,6 +146,28 @@ service cloud.firestore {
         && request.resource.data.accuracy >= 0 && request.resource.data.accuracy <= 100
         && request.resource.data.createdAt is number;
       allow update: if false;
+      allow delete: if isTeacher();
+    }
+
+    // ── 학급 배틀 결과(문서 id = 방 id). 참가자 여럿이 같은 내용으로 덮어쓴다 ──
+    // 한계: 서버가 없어 점수(total·players) 위조 자체는 막을 수 없다. 형식·범위와 "자기 반 기록만"을 강제한다.
+    function classBattleOk(id) {
+      let d = request.resource.data;
+      let me = get(studentPath(myLink().sid)).data;
+      return d.keys().hasOnly(['id', 'grade', 'classNo', 'date', 'at', 'lang', 'durationSec', 'total', 'players'])
+        && d.id == id
+        && d.grade == me.grade
+        && d.classNo == me.classNo
+        && d.total is number && d.total >= 0 && d.total <= 1000000
+        && d.players is list && d.players.size() >= 1 && d.players.size() <= 40
+        && d.date is string && d.date.size() == 10
+        && d.at is number
+        && d.durationSec is number
+        && (d.lang == 'ko' || d.lang == 'en');
+    }
+    match /classBattles/{id} {
+      allow read: if isMember();
+      allow create, update: if hasLink() && classBattleOk(id);
       allow delete: if isTeacher();
     }
 

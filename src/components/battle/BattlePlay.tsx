@@ -679,6 +679,12 @@ export function BattlePlay({
           <div className="font-bold">순위{teamMode ? ' · 팀전' : ''}</div>
           <div className="text-xs text-white/40">{room.startCount}명</div>
         </div>
+        {room.klass && (
+          <div className="mb-2 rounded-xl bg-gold/20 py-1.5 text-center ring-1 ring-gold/40">
+            <div className="text-[11px] text-white/60">반 총점</div>
+            <div className="text-3xl font-black tabular-nums text-gold">{ranks.reduce((a, r) => a + r.score, 0)}</div>
+          </div>
+        )}
         {teamMode && (
           <div className="mb-2 grid grid-cols-2 gap-1.5 text-center text-sm font-black">
             {TEAM_NAMES.map((name, i) => (
@@ -688,7 +694,7 @@ export function BattlePlay({
             ))}
           </div>
         )}
-        <ol className="min-h-0 flex-1 space-y-1 overflow-hidden">
+        <ol className={`min-h-0 flex-1 ${room.klass ? 'space-y-0.5 overflow-y-auto' : 'space-y-1 overflow-hidden'}`}>
           {ranks.map((r) => {
             const me = r.id === meId;
             // 나는 지금 이 화면에 있으므로 흐리게 하지 않는다(새로 고침 뒤 online=false 로 남는 경우 포함)
@@ -696,7 +702,7 @@ export function BattlePlay({
             return (
               <li
                 key={r.id}
-                className={`flex items-center gap-2 rounded-lg px-2.5 py-1 text-sm transition ${
+                className={`flex items-center gap-2 rounded-lg px-2.5 transition ${room.klass ? 'py-0.5 text-xs' : 'py-1 text-sm'} ${
                   me ? 'bg-mint-500 font-bold text-white' : 'bg-white/5'
                 } ${off ? 'opacity-40' : ''}`}
                 title={off ? '접속 끊김' : undefined}

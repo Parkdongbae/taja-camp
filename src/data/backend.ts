@@ -12,6 +12,7 @@ import type {
   Settings,
   Student,
   TeacherApplicant,
+  ClassBattleRecord,
 } from './types';
 
 export type Unsub = () => void;
@@ -78,6 +79,12 @@ export interface Backend {
   watchRooms(tier: number, lang: Lang, cb: (rooms: BattleRoom[]) => void): Unsub;
   /** 대기 중이고 자리가 남은 같은 계급 방에 들어가거나, 없으면 새로 만든다. roomId 반환. */
   joinOrCreateRoom(tier: number, lang: Lang, me: BattlePlayer): Promise<string>;
+  /** 학급 배틀: 내 반(klass = "학년반")의 대기 중인 방에 들어가거나 새로 만든다(정원 CLASS_MAX_PLAYERS, tier = CLASS_TIER, 경기 시간 durationSec 고정). roomId 반환. */
+  joinOrCreateClassRoom(klass: string, lang: Lang, me: BattlePlayer, durationSec: number): Promise<string>;
+  /** 학급 배틀 결과 저장(같은 id 로 여러 참가자가 써도 안전: 같은 내용으로 덮어쓴다). */
+  saveClassBattle(rec: ClassBattleRecord): Promise<void>;
+  /** 최근 학급 배틀 결과(끝난 시각 내림차순, 모든 반). */
+  listClassBattles(max: number): Promise<ClassBattleRecord[]>;
   leaveRoom(roomId: string, playerId: string): Promise<void>;
   watchRoom(roomId: string, cb: (room: BattleRoom | null) => void): Unsub;
   /** 방장만, 대기 중일 때만. 경기 시간(초)을 바꾼다. */
