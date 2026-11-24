@@ -30,6 +30,18 @@
 | 선생님 모드 | 학생 추가·삭제·일괄 등록, PIN 초기화, 학습 현황, 수업 설정(배틀 허용·임시 공개, 연습·배틀에 낼 과목·단원 고르기 등), 콘텐츠 올리기 |
 | 키보드 선택 | 데스크톱 / 노트북 / 서피스 고3 |
 
+## 먼저 체험해 보기 (연습 사이트)
+
+설치하기 전에 아래 연습 사이트에서 선생님 모드를 직접 눌러 볼 수 있습니다.
+
+- 연습 사이트: <https://taja-252d2cf3.web.app>
+- 선생님 모드: <https://taja-252d2cf3.web.app/teacher>
+  - 아이디(이메일): `taja_king@abc.com`
+  - 비밀번호: `taja_king@abc.com`
+
+선생님 모드의 **학생 관리**에서 학번(4자리)과 이름을 등록하면, 첫 화면에서 그 학번으로 "처음 접속"을 골라 학생 화면도 볼 수 있습니다.
+여러 선생님이 함께 쓰는 공개 체험용이라 기록과 설정이 언제든 바뀌거나 지워질 수 있습니다. 실제 학생 정보는 넣지 마세요.
+
 ## 우리 학교에 설치하기 (구글 계정만 있으면 됩니다)
 
 [![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/Parkdongbae/taja-camp&cloudshell_tutorial=docs/SETUP.md)
