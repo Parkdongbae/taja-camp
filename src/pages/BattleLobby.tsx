@@ -283,6 +283,12 @@ export default function BattleLobby() {
                 <li>
                   · 특수 낱말 보너스: <span className="text-sky-300">⚡빠름 +1 · 👻깜빡 +2 · 🌀흔들 +1 · ★황금 2배</span>
                 </li>
+                <li>
+                  · <span className="text-mint-300">🤝 협동 낱말</span>은 모두가 각자 쳐야 해요. 다 같이 성공하면 모두 점수 2~4배(빠를수록 높음)
+                </li>
+                <li>· 🔥 피버 타임 10초 동안은 점수 2배! 🌫️ 안개·🙃 거꾸로 구간도 나와요</li>
+                <li>· 📖 뜻 낱말(+2)은 뜻풀이를 보고 낱말을 쳐요. 🚀 역전 찬스(+4)는 하위권에게만 보여요</li>
+                <li>· 방장이 팀전(홍팀·청팀)을 고를 수 있고, 끝나면 칭호를 받아요</li>
                 <li>· 오타 없이 연속 20개를 얻으면 ⚡파워 발동! 다른 참가자 점수의 절반을 가져와요</li>
                 <li>
                   · <span className="text-white/50">기본자리 낱말 1점</span> · <span className="text-white">한 단어 2점</span> ·{' '}

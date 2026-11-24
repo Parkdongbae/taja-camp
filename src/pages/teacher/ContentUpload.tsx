@@ -239,7 +239,7 @@ export default function ContentUpload() {
 }
 
 function CountTable() {
-  const { words, sentences, passages } = useContent();
+  const { allWords: words, allSentences: sentences, allPassages: passages } = useContent();
   const rows = SUBJECTS.map((s) => ({
     s,
     w: words.filter((x) => x.subject === s).length,
@@ -278,7 +278,7 @@ function CountTable() {
 
 // 교사용 내용 확인: 과목을 고르면 낱말·뜻 표
 function Viewer() {
-  const words = useContent((s) => s.words);
+  const words = useContent((s) => s.allWords);
   const [subject, setSubject] = useState<Subject>('basic');
   const [lang, setLang] = useState<Lang>('ko');
   const rows = useMemo(() => words.filter((w) => w.subject === subject && w.lang === lang), [words, subject, lang]);

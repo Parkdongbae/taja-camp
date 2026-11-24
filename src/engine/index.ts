@@ -5,4 +5,6 @@ export * from './judge';
 export * from './stages';
 export * from './scoring';
 export * from './battle';
+export * from './events';
+export * from './awards';
 export { randInt, shuffle, seedFromString } from './rng';

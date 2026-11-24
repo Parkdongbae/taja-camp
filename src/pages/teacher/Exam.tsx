@@ -405,7 +405,7 @@ function SettingsCard({
   setTitle: (t: string) => void;
   save: (p: Partial<ExamConfig>) => Promise<void>;
 }) {
-  const passages = useContent((s) => s.passages);
+  const passages = useContent((s) => s.allPassages); // 수행평가 글은 콘텐츠 선택과 무관
   const koList = useMemo(() => passages.filter((p) => p.lang === 'ko'), [passages]);
   const enList = useMemo(() => passages.filter((p) => p.lang === 'en'), [passages]);
   const showKo = langMode !== 'en';

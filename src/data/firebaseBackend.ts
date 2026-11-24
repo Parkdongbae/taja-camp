@@ -164,6 +164,7 @@ function toRoom(id: string, v: unknown): BattleRoom | null {
     claims: objOf<{ by: string; at: number }>(r.claims),
     freezes: objOf<{ at: number; ms: number }>(r.freezes),
     ...(r.fall && typeof r.fall === 'object' ? { fall: r.fall as FallSpeed } : {}),
+    ...(r.mode === 'team' ? { mode: 'team' as const } : {}),
   };
 }
 
@@ -1036,6 +1037,18 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
         const cur = snap.val() as { host?: string; state?: string } | null;
         if (!cur || cur.state !== 'waiting' || cur.host !== me) return;
         await D.update(D.ref(db, `rooms/${roomId}`), { durationSec: v });
+      });
+    },
+
+    setRoomMode(roomId, mode) {
+      return run(async (fb) => {
+        const { D, db } = fb;
+        const me = myStudentId();
+        if (!me) throw new AppError('PERMISSION', '학생으로 로그인해야 합니다.');
+        const snap = await D.get(D.ref(db, `rooms/${roomId}`));
+        const cur = snap.val() as { host?: string; state?: string } | null;
+        if (!cur || cur.state !== 'waiting' || cur.host !== me) return;
+        await D.update(D.ref(db, `rooms/${roomId}`), { mode: mode === 'team' ? 'team' : 'ffa' });
       });
     },
 

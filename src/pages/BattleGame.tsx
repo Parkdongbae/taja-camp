@@ -14,7 +14,7 @@ import { Btn, Kbd } from '../components/ui';
 import { BattleWaiting } from '../components/battle/BattleWaiting';
 import { BattlePlay, type BattleDriver } from '../components/battle/BattlePlay';
 import { BattleResult } from '../components/battle/BattleResult';
-import { battlePool, rewardKey, type LobbyState } from '../components/battle/battleUtil';
+import { battlePool, battleRiddles, rewardKey, type LobbyState } from '../components/battle/battleUtil';
 import type { BattleRank } from '../engine/scoring';
 import { finishBattle } from '../state/record';
 
@@ -28,7 +28,7 @@ export default function BattleGame() {
   const student = useAuth((s) => s.student);
   const meId = student?.id ?? '';
   const loaded = useContent((s) => s.loaded);
-  const words = useContent((s) => s.words);
+  const liveWords = useContent((s) => s.words);
 
   const [live, setLive] = useState<BattleRoom | null | undefined>(undefined);
   const [lastDone, setLastDone] = useState<BattleRoom | null>(null);
@@ -108,6 +108,14 @@ export default function BattleGame() {
     [roomId],
   );
 
+  // 방장: 개인전·팀전 바꾸기
+  const onMode = useCallback(
+    (mode: 'ffa' | 'team') => {
+      void backend.setRoomMode(roomId, mode).catch(() => setError('경기 방식을 바꾸지 못했어요. (서버 규칙이 아직 반영되지 않았을 수 있어요)'));
+    },
+    [roomId],
+  );
+
   const onLeave = useCallback(async () => {
     if (leftRef.current) return;
     leftRef.current = true;
@@ -140,10 +148,17 @@ export default function BattleGame() {
   const fall1 = room?.fall?.p1 ?? 100;
   const fall2 = room?.fall?.p2 ?? 100;
   const fall4 = room?.fall?.p4 ?? 100;
+  // 경기 도중 교사가 콘텐츠 선택을 바꿔도 일정이 달라지지 않게, 이 판에서 처음 쓴 낱말 목록을 그대로 쓴다
+  const frozen = useRef<{ key: string; words: typeof liveWords } | null>(null);
+  const gameKey = `${roomId}:${seed}`;
+  if (started && loaded && frozen.current?.key !== gameKey) frozen.current = { key: gameKey, words: liveWords };
+  const words = started && frozen.current?.key === gameKey ? frozen.current.words : liveWords;
   const schedule = useMemo(
     () =>
       started && loaded
-        ? buildSchedule(seed, battlePool(words, lang), startCount, durationSec, hasFall ? { p1: fall1, p2: fall2, p4: fall4 } : null)
+        ? buildSchedule(seed, battlePool(words, lang), startCount, durationSec, hasFall ? { p1: fall1, p2: fall2, p4: fall4 } : null, {
+            riddles: battleRiddles(words, lang).keys(),
+          })
         : null,
     [started, loaded, seed, startCount, durationSec, lang, words, hasFall, fall1, fall2, fall4],
   );
@@ -182,7 +197,7 @@ export default function BattleGame() {
 
   if (room.state === 'waiting') {
     if (!inRoom) return <Dark>로비로 돌아가는 중...</Dark>;
-    return <BattleWaiting room={room} meId={meId} onStart={onStart} onLeave={onLeave} onDuration={onDuration} starting={starting} error={error} />;
+    return <BattleWaiting room={room} meId={meId} onStart={onStart} onLeave={onLeave} onDuration={onDuration} onMode={onMode} starting={starting} error={error} />;
   }
 
   if (!inRoom) {

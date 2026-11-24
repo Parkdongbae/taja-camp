@@ -1,5 +1,8 @@
 // 콘텐츠 로더: 내장 기초 콘텐츠 + 교사가 올린 교과 콘텐츠를 합쳐 제공한다.
-//   useContent(): { loaded, hasTextbook, version, words, sentences, passages }
+//   useContent(): { loaded, hasTextbook, version, words, sentences, passages, allWords, allSentences, allPassages, pick }
+//     - words·sentences·passages 는 교사가 고른 콘텐츠(Settings.contentPick)만 남긴 것. 연습·퀴즈·배틀은 이것을 쓴다.
+//     - all* 은 거르지 않은 전체. 선생님 화면(콘텐츠 확인·수행평가 글 고르기)과 수행평가는 이것을 쓴다.
+//   setContentPick(pick): 수업 설정이 바뀔 때 state/auth 가 부른다(값이 같으면 아무것도 하지 않음)
 //   loadContent(force?): 로그인 후 1회 호출
 //   pickWords / pickSentences / pickPassages(lang, subject): 언어·과목으로 거르기
 //   subjectsFor(kind, lang): 콘텐츠가 있는 과목 목록,  shuffle(arr, rand?)
@@ -7,6 +10,7 @@ import { create } from 'zustand';
 import { backend } from '../data';
 import type { Lang, PassageItem, SentenceItem, Subject, WordItem } from '../data/types';
 import { BUILTIN } from './builtin';
+import { filterByPick, normalizePick } from './pick';
 
 interface ContentState {
   loaded: boolean;
@@ -15,6 +19,10 @@ interface ContentState {
   words: WordItem[];
   sentences: SentenceItem[];
   passages: PassageItem[];
+  allWords: WordItem[];
+  allSentences: SentenceItem[];
+  allPassages: PassageItem[];
+  pick: string[]; // 교사가 고른 "과목|단원" 키(비어 있으면 전체)
 }
 
 export const useContent = create<ContentState>(() => ({
@@ -24,7 +32,29 @@ export const useContent = create<ContentState>(() => ({
   words: BUILTIN.words,
   sentences: BUILTIN.sentences,
   passages: BUILTIN.passages,
+  allWords: BUILTIN.words,
+  allSentences: BUILTIN.sentences,
+  allPassages: BUILTIN.passages,
+  pick: [],
 }));
+
+/** 전체 목록과 선택을 받아 화면에 낼 목록까지 한 번에 만든다 */
+function withPick(all: { allWords: WordItem[]; allSentences: SentenceItem[]; allPassages: PassageItem[] }, pick: string[]) {
+  return {
+    ...all,
+    pick,
+    words: filterByPick(all.allWords, pick),
+    sentences: filterByPick(all.allSentences, pick),
+    passages: filterByPick(all.allPassages, pick),
+  };
+}
+
+export function setContentPick(pick: unknown): void {
+  const next = normalizePick(pick);
+  const cur = useContent.getState();
+  if (next.join('\n') === cur.pick.join('\n')) return;
+  useContent.setState(withPick(cur, next));
+}
 
 let loading: Promise<void> | null = null;
 export function loadContent(force = false): Promise<void> {
@@ -37,9 +67,14 @@ export function loadContent(force = false): Promise<void> {
           loaded: true,
           hasTextbook: true,
           version: up.version,
-          words: [...BUILTIN.words, ...up.words],
-          sentences: [...BUILTIN.sentences, ...up.sentences],
-          passages: [...BUILTIN.passages, ...up.passages],
+          ...withPick(
+            {
+              allWords: [...BUILTIN.words, ...up.words],
+              allSentences: [...BUILTIN.sentences, ...up.sentences],
+              allPassages: [...BUILTIN.passages, ...up.passages],
+            },
+            useContent.getState().pick,
+          ),
         });
         return;
       }

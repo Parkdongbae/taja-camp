@@ -3,11 +3,14 @@
 // - settle({ room, me }) (보통 finishBattle) 은 settleKey 에 대해 한 번만
 //   (sessionStorage 표시 + 진행 중 Promise 공유 → StrictMode·새로 고침에도 중복 없음).
 // - extra(res) 는 순위표 위에 덧붙일 내용(컴퓨터 대결의 다음 수준 안내 등).
+// - 팀전이면 팀 점수와 이긴 팀, 그리고 칭호(engine/awards.battleAwards: 속사포·협동왕·막판 스퍼트 등)를 보여 준다.
 // - 계급이 오르면 진급 축하 창.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { BattleRoom } from '../../data/types';
 import type { FallingWord } from '../../engine/battle';
-import { rankPlayers, tierName, tierProgress, type BattleRank } from '../../engine/scoring';
+import { rankPlayers, teamScores, tierName, tierProgress, type BattleRank } from '../../engine/scoring';
+import { battleAwards } from '../../engine/awards';
+import { TEAM_NAMES } from '../../engine/events';
 import { useAuth } from '../../state/auth';
 import type { BattleFinish } from '../../state/record';
 import { TierBadge } from '../TierBadge';
@@ -60,6 +63,9 @@ export function BattleResult({
   const student = useAuth((s) => s.student);
   const ranks = useMemo(() => rankPlayers(room, schedule), [room, schedule]);
   const mine = ranks.find((r) => r.id === meId);
+  const awards = useMemo(() => battleAwards(room, schedule), [room, schedule]);
+  const teamMode = room.mode === 'team';
+  const teamPts = teamScores(ranks);
   const [reward, setReward] = useState<Reward>(null);
   const [promoClosed, setPromoClosed] = useState(false);
 
@@ -194,6 +200,47 @@ export function BattleResult({
 
         {extra?.(res)}
 
+        {teamMode && (
+          <div className="grid grid-cols-2 gap-3 text-center">
+            {TEAM_NAMES.map((name, i) => {
+              const win = teamPts[i] > teamPts[1 - i];
+              return (
+                <div
+                  key={name}
+                  className={`rounded-2xl px-4 py-3 font-black ${i === 0 ? 'bg-rose-500/80' : 'bg-sky-500/80'} ${win ? 'ring-4 ring-gold' : 'opacity-70'} ${
+                    mine?.team === i ? 'outline outline-2 outline-white' : ''
+                  }`}
+                >
+                  <div className="text-sm">
+                    {win ? '🏆 ' : ''}
+                    {name}
+                    {mine?.team === i ? ' (우리 팀)' : ''}
+                    {teamPts[0] === teamPts[1] ? ' · 무승부' : win ? ' 승리!' : ''}
+                  </div>
+                  <div className="text-3xl tabular-nums">{teamPts[i]}점</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {awards.length > 0 && (
+          <div className="max-h-32 shrink-0 overflow-auto rounded-2xl bg-white/5 px-5 py-3 ring-1 ring-white/10">
+            <div className="mb-2 text-sm font-bold">🏅 이번 판 칭호</div>
+            <div className="flex flex-wrap gap-2">
+              {awards.map((a) => (
+                <div
+                  key={a.id}
+                  title={a.desc}
+                  className={`rounded-full px-3 py-1 text-sm ${a.winner === meId ? 'bg-gold font-bold text-ink' : 'bg-white/10 text-white/80'}`}
+                >
+                  {a.icon} {a.title} · <b>{a.name}</b> <span className={a.winner === meId ? 'text-ink/60' : 'text-white/40'}>({a.desc})</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="min-h-0 flex-1 overflow-auto rounded-2xl bg-white/5 p-5 ring-1 ring-white/10">
           <div className="mb-3 font-bold">최종 순위</div>
           <ol className="grid grid-cols-2 gap-x-6 gap-y-1.5">
@@ -205,6 +252,7 @@ export function BattleResult({
                   className={`flex items-center gap-3 rounded-lg px-3 py-1.5 ${me ? 'bg-mint-500 font-bold' : 'bg-white/5'}`}
                 >
                   <span className="w-8 text-center text-lg">{r.place <= 3 ? MEDAL[r.place - 1] : <span className="text-sm text-white/50">{r.place}</span>}</span>
+                  {teamMode && r.team >= 0 && <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${r.team === 0 ? 'bg-rose-500' : 'bg-sky-500'}`} />}
                   <span className="min-w-0 flex-1 truncate">
                     {r.name}
                     {me ? ' (나)' : ''} <span className={`text-xs ${me ? 'text-white/80' : 'text-white/40'}`}>{r.classNo ? `${r.classNo}반` : ''}</span>

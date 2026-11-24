@@ -47,7 +47,7 @@ describe('점수별 낙하 속도', () => {
     expect(c.length).toBeGreaterThan(10);
     for (const w of c) {
       const m = w.points === 4 ? 2 : w.points === 2 ? 1.25 : 1;
-      expect(w.fallMs).toBe(Math.round(fallMsAt(w.spawnAt, 60000) / m / (w.fast ? 1.7 : 1)));
+      expect(w.fallMs).toBe(Math.round((fallMsAt(w.spawnAt, 60000) / m / (w.fast ? 1.7 : 1)) * (w.coopMult === 2 ? 1.5 : w.coopMult === 4 ? 0.7 : 1)));
     }
   });
   it('값을 50~200 으로 정리한다', () => {

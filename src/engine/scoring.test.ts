@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { battleEvents } from './events';
 import { newStudent, type BattleRoom, type SessionRecord, type Student } from '../data/types';
 import {
   BADGES,
@@ -10,6 +11,7 @@ import {
   levelOf,
   levelProgress,
   rankPlayers,
+  teamScores,
   rpGain,
   tierName,
   tierOf,
@@ -163,6 +165,46 @@ describe('rankPlayers', () => {
     expect(by.a).toMatchObject({ score: 4, lost: 2, words: 2 });
     expect(by.b).toMatchObject({ score: 1, lost: 2, words: 2 });
     expect(r.reduce((n, x) => n + x.score, 0)).toBe(9); // 전체 합은 그대로
+  });
+  it('협동 낱말: 모두 치면 모두 배수 점수, 아니면 친 사람만 기본 점수', () => {
+    const C = 10_000_000;
+    const cw = [{ index: 0, points: 2, coop: true, coopMult: 3 }, { index: 1, points: 1 }];
+    // 실패: a, b 만 침
+    let r = rankPlayers(room({ [String(C)]: { by: 'a', at: 10 }, [String(C + 1)]: { by: 'b', at: 20 } }), cw);
+    let by = Object.fromEntries(r.map((x) => [x.id, x]));
+    expect([by.a.score, by.b.score, by.c.score]).toEqual([2, 2, 0]);
+    expect(by.a.coop).toBe(0);
+    // 성공: 셋 다 침 → 2 × 3
+    r = rankPlayers(room({ [String(C)]: { by: 'a', at: 10 }, [String(C + 1)]: { by: 'b', at: 20 }, [String(C + 2)]: { by: 'c', at: 30 }, '1': { by: 'a', at: 5 } }), cw);
+    by = Object.fromEntries(r.map((x) => [x.id, x]));
+    expect([by.a.score, by.b.score, by.c.score]).toEqual([7, 6, 6]);
+    expect([by.a.coop, by.a.words, by.b.lastAt]).toEqual([1, 2, 30]);
+    // 접속이 끊긴 사람은 빼고 판단
+    const rm = room({ [String(C)]: { by: 'a', at: 10 }, [String(C + 1)]: { by: 'b', at: 20 } });
+    rm.players.c.online = false;
+    expect(rankPlayers(rm, cw).map((x) => x.score)).toEqual([6, 6, 0]);
+    // 협동 낱말을 선점 칸에 적어도 점수 없음
+    expect(rankPlayers(room({ '0': { by: 'a', at: 1 } }), cw)[0].score).toBe(0);
+  });
+  it('피버 동안 얻은 점수는 2배', () => {
+    const ev = battleEvents(1, 120);
+    const t = ev.fever!.start + 100;
+    const r = rankPlayers(room({ '1': { by: 'a', at: t }, '0': { by: 'b', at: 10 } }), words);
+    const by = Object.fromEntries(r.map((x) => [x.id, x]));
+    expect([by.a.score, by.a.fever, by.b.score, by.b.fever]).toEqual([4, 2, 1, 0]);
+  });
+  it('팀전: 팀 번호·팀 점수, 파워는 상대 팀에게서만', () => {
+    const rm = room({ '2': { by: 'a', at: 10 }, '1': { by: 'b', at: 20 }, '3': { by: 'c', at: 25 }, '1000000': { by: 'a', at: 30 } });
+    rm.players.a.joinedAt = 1;
+    rm.players.b.joinedAt = 2;
+    rm.players.c.joinedAt = 3;
+    rm.mode = 'team';
+    const r = rankPlayers(rm, words);
+    const by = Object.fromEntries(r.map((x) => [x.id, x]));
+    expect([by.a.team, by.b.team, by.c.team]).toEqual([0, 1, 0]);
+    expect([by.a.score, by.b.score, by.c.score]).toEqual([5, 1, 2]); // 같은 팀 c 는 그대로
+    expect(teamScores(r)).toEqual([7, 1]);
+    expect(rankPlayers(room({}), words)[0].team).toBe(-1);
   });
   it('0점끼리는 같은 순위', () => {
     const r = rankPlayers(room({}), words);

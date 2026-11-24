@@ -71,6 +71,8 @@ export interface Backend {
   watchRoom(roomId: string, cb: (room: BattleRoom | null) => void): Unsub;
   /** 방장만, 대기 중일 때만. 경기 시간(초)을 바꾼다. */
   setRoomDuration(roomId: string, sec: number): Promise<void>;
+  /** 방장만, 대기 중일 때만. 개인전('ffa')·팀전('team')을 바꾼다. */
+  setRoomMode(roomId: string, mode: 'ffa' | 'team'): Promise<void>;
   /** 방장만. state=playing, startAt=serverNow()+5000, seed 확정. */
   startRoom(roomId: string, fall?: FallSpeed): Promise<void>;
   /** 낱말 선점. 내가 처음이면 true. 원자적(트랜잭션)이어야 한다. */

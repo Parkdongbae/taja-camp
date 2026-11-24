@@ -1,9 +1,11 @@
 // 배틀 대기실. <BattleWaiting room meId onStart onLeave onDuration? starting error />
-// 방장만 [시작 Enter](2명 이상), [나가기 Esc]. 방장은 경기 시간을 고른다(←/→ 또는 버튼, 기본 2분).
+// 방장만 [시작 Enter](2명 이상), [나가기 Esc]. 방장은 경기 시간(←/→ 또는 버튼, 기본 2분)과 경기 방식(↑/↓ 또는 버튼: 개인전·팀전)을 고른다.
+// 팀전이면 들어온 순서대로 홍팀·청팀을 번갈아 배정해 보여 준다.
 import { useEffect } from 'react';
 import { BATTLE_MAX_PLAYERS, type BattleRoom } from '../../data/types';
 import { BATTLE_DURATIONS } from '../../engine/battle';
 import { tierName } from '../../engine/scoring';
+import { TEAM_NAMES, teamOf } from '../../engine/events';
 import { TierBadge } from '../TierBadge';
 import { Btn, Kbd } from '../ui';
 import { LANG_LABEL } from './battleUtil';
@@ -14,10 +16,12 @@ export function BattleWaiting({
   onStart,
   onLeave,
   onDuration,
+  onMode,
   starting,
   error,
 }: {
   onDuration?: (sec: number) => void;
+  onMode?: (mode: 'ffa' | 'team') => void;
   room: BattleRoom;
   meId: string;
   onStart: () => void;
@@ -29,6 +33,8 @@ export function BattleWaiting({
   const isHost = room.host === meId;
   const canStart = isHost && players.length >= 2 && !starting;
   const hostName = room.players?.[room.host]?.name ?? '';
+  const teamMode = room.mode === 'team';
+  const teams = teamOf(room.players);
   const durLabel = (sec: number) => (sec % 60 === 0 ? `${sec / 60}분` : `${Math.floor(sec / 60)}분 ${sec % 60}초`);
 
   useEffect(() => {
@@ -48,11 +54,15 @@ export function BattleWaiting({
         const i = Math.max(0, list.indexOf(room.durationSec));
         const j = Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowRight' ? 1 : -1)));
         if (list[j] !== room.durationSec) onDuration(list[j]);
+      } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && isHost && onMode) {
+        // 방장: 개인전 ↔ 팀전
+        e.preventDefault();
+        onMode(teamMode ? 'ffa' : 'team');
       }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [canStart, onStart, onLeave, isHost, onDuration, room.durationSec]);
+  }, [canStart, onStart, onLeave, isHost, onDuration, room.durationSec, onMode, teamMode]);
 
   return (
     <div className="h-full bg-ink text-white">
@@ -76,14 +86,16 @@ export function BattleWaiting({
                 key={p.id}
                 className={`anim-pop flex items-center justify-between rounded-xl px-4 py-3 ${
                   me ? 'bg-mint-500 text-white' : 'bg-white/10'
-                } ${p.online === false ? 'opacity-40' : ''}`}
+                } ${p.online === false ? 'opacity-40' : ''} ${teamMode ? (teams[p.id] === 0 ? 'ring-4 ring-rose-500' : 'ring-4 ring-sky-500') : ''}`}
               >
                 <div className="min-w-0">
                   <div className="truncate font-bold">
                     {p.name}
                     {me ? ' (나)' : ''}
                   </div>
-                  <div className={`text-xs ${me ? 'text-white/80' : 'text-white/50'}`}>{p.classNo}반</div>
+                  <div className={`text-xs ${me ? 'text-white/80' : 'text-white/50'}`}>
+                    {p.classNo}반{teamMode ? ` · ${TEAM_NAMES[teams[p.id] ?? 0]}` : ''}
+                  </div>
                 </div>
                 {p.id === room.host && (
                   <span className="shrink-0 rounded-full bg-gold px-2 py-0.5 text-xs font-bold text-ink">👑 방장</span>
@@ -102,6 +114,33 @@ export function BattleWaiting({
           <div className="text-sm text-white/70">
             <div>
               방장: <b className="text-white">{hostName}</b> · {tierName(room.tier)} 방 · <b className="text-gold">{durLabel(room.durationSec)}</b> 경기
+            </div>
+            <div className="mt-2 flex items-center gap-1.5">
+              <span className="mr-1 text-white/50">경기 방식</span>
+              {(['ffa', 'team'] as const).map((m) => {
+                const on = (m === 'team') === teamMode;
+                const label = m === 'team' ? '팀전(홍·청)' : '개인전';
+                return isHost && onMode ? (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onMode(m)}
+                    aria-pressed={on}
+                    className={`rounded-full px-3 py-1 text-xs font-bold transition ${on ? 'bg-gold text-ink' : 'bg-white/10 text-white/70 hover:bg-white/20'}`}
+                  >
+                    {label}
+                  </button>
+                ) : (
+                  <span key={m} className={`rounded-full px-3 py-1 text-xs font-bold ${on ? 'bg-gold text-ink' : 'bg-white/5 text-white/30'}`}>
+                    {label}
+                  </span>
+                );
+              })}
+              {isHost && onMode && (
+                <span className="ml-1 text-xs text-white/40">
+                  <Kbd>↑</Kbd> <Kbd>↓</Kbd> 로 바꾸기
+                </span>
+              )}
             </div>
             <div className="mt-2 flex items-center gap-1.5">
               <span className="mr-1 text-white/50">경기 시간</span>

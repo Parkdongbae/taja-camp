@@ -148,3 +148,25 @@ describe('createBotRunner / planBotClaims', () => {
     expect(n('bot3')).toBeGreaterThanOrEqual(n('bot1'));
   });
 });
+
+import { makeBots as mk, planBotCoop } from './bots';
+describe('planBotCoop', () => {
+  it('협동 낱말만, 화면에 있는 동안, 시간순, 결정적', () => {
+    const bots = mk(150);
+    const plan = planBotCoop(sched, bots, 99, DUR * 1000);
+    expect(plan).toEqual(planBotCoop(sched, bots, 99, DUR * 1000));
+    const coop = sched.filter((w) => w.coop);
+    expect(coop.length).toBeGreaterThan(0);
+    expect(plan.length).toBeGreaterThan(0);
+    expect(plan.length).toBeLessThanOrEqual(coop.length * bots.length);
+    plan.forEach((c, i) => {
+      const w = sched[c.index];
+      expect(w.coop).toBe(true);
+      expect(c.at).toBeGreaterThan(w.spawnAt);
+      expect(c.at).toBeLessThan(w.spawnAt + w.fallMs);
+      if (i) expect(c.at).toBeGreaterThanOrEqual(plan[i - 1].at);
+    });
+    // 같은 봇이 같은 낱말을 두 번 치지 않는다
+    expect(new Set(plan.map((c) => `${c.botId}:${c.index}`)).size).toBe(plan.length);
+  });
+});

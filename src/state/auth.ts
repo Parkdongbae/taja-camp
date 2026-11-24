@@ -4,6 +4,7 @@
 import { create } from 'zustand';
 import { backend } from '../data';
 import { DEFAULT_EXAM, DEFAULT_SETTINGS, type AuthUser, type Settings, type Student } from '../data/types';
+import { setContentPick } from '../content';
 
 interface AuthState {
   ready: boolean; // 최초 인증 확인이 끝났는가
@@ -36,7 +37,10 @@ export function initAuth() {
       useAuth.setState({ ready: true, user: null, student: null });
       return;
     }
-    unsubSettings = backend.watchSettings((s) => useAuth.setState({ settings: { ...DEFAULT_SETTINGS, ...s, exam: { ...DEFAULT_EXAM, ...s?.exam } } }));
+    unsubSettings = backend.watchSettings((s) => {
+      useAuth.setState({ settings: { ...DEFAULT_SETTINGS, ...s, exam: { ...DEFAULT_EXAM, ...s?.exam } } });
+      setContentPick(s?.contentPick); // 교사가 고른 콘텐츠만 연습·배틀에 낸다
+    });
     if (user.role === 'student') {
       useAuth.setState({ user });
       unsubStudent = backend.watchStudent(user.studentId, (student) => {

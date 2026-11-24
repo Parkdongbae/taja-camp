@@ -11,11 +11,21 @@
 //   특수 낱말(⚡빠름 +1 · 👻깜빡 +2 · 🌀흔들 +1 · ★황금 2배)은 이름 옆에 보너스 표시.
 // - 파워게이지: 오타 없이 연속 POWER_NEED(20)개를 얻으면 자동으로 "포인트 회수"(다른 참가자 점수의 절반을 가져옴).
 //   claims 의 파워 칸(nextPowerIndex)에 driver.claim 으로 기록한다. 오타면 게이지 0, 한발 늦은 것은 유지.
+// - 협동 낱말(🤝): 선착순이 아니라 각자 친다(driver.claim 으로 nextCoopIndex 칸에 기록). 낱말 옆에 "친 사람/전체" 를 보여 주고,
+//   접속 중인 모두가 치면 모두 기본 점수 × 배수(느림 2 · 보통 3 · 빠름 4). 끝까지 못 모이면 친 사람만 기본 점수.
+// - 피버(🔥 10초, 점수 2배·낱말 폭주) · 안개(🌫️ 가운데가 가려짐) · 거꾸로(🙃 낱말이 뒤집힘): engine/events.battleEvents 의 시각대로.
+// - 역전 찬스 낱말(🚀 +4): 하위권(isUnderdog)인 사람에게만 보이고 그 사람만 칠 수 있다.
+// - 뜻 낱말(📖 +2): 뜻풀이가 떠다니고 낱말을 쳐야 한다(뜻은 useContent 의 낱말에서 찾는다).
+// - 팀전(room.mode === 'team'): 순위표 위에 팀 점수, 이름 앞에 팀 색 점.
 // - 배경음: 경기 중에만(소리 켬 + usePrefs.bgm). 마지막 20초에는 빨라진다.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BattleRoom } from '../../data/types';
 import {
+  coopDone,
+  coopHits,
+  coopRequired,
   matchSubmission,
+  nextCoopIndex,
   nextPowerIndex,
   isPowerIndex,
   POWER_NEED,
@@ -26,14 +36,19 @@ import {
   type FallingWord,
 } from '../../engine/battle';
 import { normalizeText } from '../../engine/hangul';
-import { rankPlayers } from '../../engine/scoring';
+import { rankPlayers, teamScores } from '../../engine/scoring';
 import { BattleInput, type SubmitResult } from './BattleInput';
-import { LANG_LABEL } from './battleUtil';
+import { battleRiddles, LANG_LABEL } from './battleUtil';
+import { battleEvents, feverAt, isUnderdog, TEAM_NAMES, twistAt, type TwistKind } from '../../engine/events';
+import { useContent } from '../../content';
 import {
   playAlarm,
   playBonus,
   playCombo,
+  playCoop,
   playEnd,
+  playFever,
+  playTwist,
   playError,
   playFreeze,
   playLate,
@@ -58,11 +73,16 @@ const WORD_COLOR: Record<1 | 2 | 4, string> = {
   4: 'text-gold drop-shadow-[0_0_6px_var(--color-gold)]',
 };
 const WORD_GOLDEN = 'text-ink bg-gold shadow-[0_0_12px_var(--color-gold)]';
+const WORD_COOP = 'text-white bg-mint-600/85 ring-2 ring-mint-300';
+const WORD_COMEBACK = 'text-white bg-fuchsia-600/85 ring-2 ring-fuchsia-300';
+const WORD_RIDDLE = 'text-sky-100 bg-sky-900/70 ring-1 ring-sky-400';
+const TEAM_DOT = ['bg-rose-500', 'bg-sky-500'];
 const BURST_MS = 600;
 const SWAY_PX = 26;
 const POWER_FX_MS = 2600;
 const lim = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(Math.max(lo, hi), n));
-const fxIcons = (w: FallingWord) => `${w.fast ? '⚡' : ''}${w.blink ? '👻' : ''}${w.zigzag ? '🌀' : ''}${w.golden ? '★' : ''}`;
+const fxIcons = (w: FallingWord) =>
+  `${w.fast ? '⚡' : ''}${w.blink ? '👻' : ''}${w.zigzag ? '🌀' : ''}${w.golden ? '★' : ''}${w.comeback ? '🚀' : ''}${w.riddle ? '📖' : ''}`;
 const LAST_SEC = 20;
 
 interface WordEl {
@@ -71,6 +91,9 @@ interface WordEl {
   h: number;
   x: number;
   y: number;
+  /** 협동 낱말의 진행 표시 */
+  tag?: HTMLSpanElement;
+  tagText?: string;
 }
 
 export interface BattleDriver {
@@ -105,6 +128,14 @@ export function BattlePlay({
   title?: string;
 }) {
   const settings = useAuth((s) => s.settings);
+  // 뜻 낱말의 뜻풀이, 경기 중 이벤트(피버·안개·거꾸로)
+  const contentWords = useContent((s) => s.words);
+  const meanings = useMemo(() => battleRiddles(contentWords, room.lang), [contentWords, room.lang]);
+  const meaningsRef = useRef(meanings);
+  const ev = useMemo(() => battleEvents(room.seed, room.durationSec), [room.seed, room.durationSec]);
+  const [fever, setFever] = useState(false);
+  const [twist, setTwist] = useState<TwistKind | null>(null);
+  const underdogRef = useRef(false);
   const roomRef = useRef(room);
   const driverRef = useRef(driver);
   const setRef = useRef(settings);
@@ -112,7 +143,8 @@ export function BattlePlay({
     roomRef.current = room;
     driverRef.current = driver;
     setRef.current = settings;
-  }, [room, driver, settings]);
+    meaningsRef.current = meanings;
+  }, [room, driver, settings, meanings]);
 
   // 멈추기(누가·남은 초)와 욕설 제재(남은 초). 제재 끝 시각은 새로 고침해도 남게 sessionStorage 에 둔다.
   const [freezeBy, setFreezeBy] = useState('');
@@ -149,11 +181,13 @@ export function BattlePlay({
     const layer = layerRef.current;
     if (!layer) return;
     const els = new Map<number, WordEl>();
+    let coopSrc: BattleRoom['claims'] | null = null;
+    let coopMap = new Map<number, Record<string, number>>();
     let raf = 0;
     let finishCalled = false;
     const burstTimers: number[] = [];
 
-    const burst = (rec: WordEl, word: FallingWord, by: string) => {
+    const burst = (rec: WordEl, word: FallingWord, by: string, label?: string) => {
       const mine = by === meId;
       const name = roomRef.current.players?.[by]?.name ?? by;
       const box = document.createElement('div');
@@ -162,7 +196,7 @@ export function BattlePlay({
       box.style.minWidth = `${rec.w}px`;
       const tag = document.createElement('div');
       tag.className = `rounded-full px-2 py-0.5 text-xs font-bold ${mine ? 'bg-mint-500 text-white' : 'bg-white/25 text-white'}`;
-      tag.textContent = mine ? `나 +${word.score}` : name;
+      tag.textContent = label ?? (mine ? `나 +${word.score}` : name);
       const txt = document.createElement('div');
       txt.className = `whitespace-nowrap text-2xl font-black ${mine ? 'text-mint-300' : 'text-white/60'}`;
       txt.textContent = word.text;
@@ -205,6 +239,11 @@ export function BattlePlay({
       setFreezeBy(af ? af.by : '');
       setFreezeLeft(af ? Math.ceil((af.until - nowT) / 1000) : 0);
       setPenaltyLeft(t < durMs ? Math.max(0, Math.ceil((penaltyUntil.current - Date.now()) / 1000)) : 0);
+      const inPlay = t >= 0 && t < durMs;
+      const tw = inPlay ? twistAt(ev, t) : null;
+      setFever(inPlay && feverAt(ev, t));
+      setTwist(tw);
+      const flip = tw === 'flip' ? ' rotate(180deg)' : '';
 
       if (t >= durMs) {
         clearWords();
@@ -219,12 +258,36 @@ export function BattlePlay({
       const W = layer.clientWidth;
       const H = layer.clientHeight;
       const claims = r.claims ?? {};
+      if (claims !== coopSrc) {
+        coopSrc = claims;
+        coopMap = coopHits(claims);
+      }
+      const required = coopRequired(r.players);
       const seen = new Set<number>();
       if (t >= 0) {
         for (const w of visibleWords(schedule, t)) {
           const c = claims[String(w.index)];
           let rec = els.get(w.index);
-          if (c) {
+          const hits = w.coop ? coopMap.get(w.index) : undefined;
+          if (w.comeback && !c && !underdogRef.current) {
+            // 역전 찬스: 하위권이 아니면 보이지 않는다
+            if (rec) {
+              rec.el.remove();
+              els.delete(w.index);
+            }
+            continue;
+          }
+          if (w.coop && coopDone(hits, required)) {
+            // 협동 성공: 모두에게 배수 점수
+            if (rec) {
+              burst(rec, w, meId, `🤝 협동 성공! 모두 +${w.points * w.coopMult}`);
+              playCoop();
+              rec.el.remove();
+              els.delete(w.index);
+            }
+            continue;
+          }
+          if (c && !w.coop) {
             if (rec) {
               burst(rec, w, c.by);
               rec.el.remove();
@@ -235,8 +298,17 @@ export function BattlePlay({
           seen.add(w.index);
           if (!rec) {
             const el = document.createElement('div');
-            el.className = `${WORD_BASE} ${w.golden ? WORD_GOLDEN : WORD_COLOR[w.points]}`;
-            el.textContent = w.text;
+            const meaning = w.riddle ? meaningsRef.current.get(w.text) : undefined;
+            el.className = meaning
+              ? `${WORD_BASE.replace('text-2xl', 'text-lg')} ${WORD_RIDDLE}`
+              : `${WORD_BASE} ${w.coop ? WORD_COOP : w.comeback ? WORD_COMEBACK : w.golden ? WORD_GOLDEN : WORD_COLOR[w.points]}`;
+            el.textContent = meaning ?? w.text; // 뜻 낱말은 뜻풀이를 보여 준다(뜻을 못 찾으면 낱말 그대로)
+            let coopTag: HTMLSpanElement | undefined;
+            if (w.coop) {
+              coopTag = document.createElement('span');
+              coopTag.className = 'ml-1.5 align-middle text-xs font-black text-gold';
+              el.appendChild(coopTag);
+            }
             if (w.bonus > 0) {
               const tag = document.createElement('span');
               tag.className = `ml-1 align-top text-xs font-black ${w.golden ? 'text-ink' : 'text-sky-300'}`;
@@ -245,8 +317,19 @@ export function BattlePlay({
             }
             if (w.blink) el.style.transition = 'none';
             layer.appendChild(el);
-            rec = { el, w: el.offsetWidth, h: el.offsetHeight, x: 0, y: 0 };
+            rec = { el, w: el.offsetWidth, h: el.offsetHeight, x: 0, y: 0, tag: coopTag };
             els.set(w.index, rec);
+          }
+          const iHit = !!hits && hits[meId] !== undefined;
+          if (rec.tag) {
+            // 협동 진행: 배수 · 친 사람/전체 · 내가 쳤으면 ✔
+            const n = required.filter((id) => hits?.[id] !== undefined).length;
+            const text = `🤝×${w.coopMult} ${n}/${required.length}${iHit ? ' ✔' : ''}`;
+            if (text !== rec.tagText) {
+              rec.tagText = text;
+              rec.tag.textContent = text;
+              rec.w = rec.el.offsetWidth;
+            }
           }
           // 진행 방향 축은 0→1, 직각 축은 w.x(+흔들림)
           const p = wordY(w, t);
@@ -258,8 +341,8 @@ export function BattlePlay({
             rec.y = lim(w.x * H - rec.h / 2 + sway, 2, H - rec.h - 2);
             rec.x = 4 + (w.dir === 'right' ? p : 1 - p) * Math.max(0, W - rec.w - 8);
           }
-          rec.el.style.transform = `translate3d(${rec.x}px, ${rec.y}px, 0)`;
-          rec.el.style.opacity = String(wordAlpha(w, t) * (pendingRef.current.has(w.index) ? 0.35 : 1));
+          rec.el.style.transform = `translate3d(${rec.x}px, ${rec.y}px, 0)${flip}`;
+          rec.el.style.opacity = String(wordAlpha(w, t) * (w.coop ? (iHit ? 0.6 : 1) : pendingRef.current.has(w.index) ? 0.35 : 1));
         }
       }
       // 끝에 닿은 낱말 지우기
@@ -277,7 +360,7 @@ export function BattlePlay({
       clearWords();
       layer.replaceChildren();
     };
-  }, [schedule, durMs, meId]);
+  }, [schedule, durMs, meId, ev]);
 
   // 종료 표시가 안 되면(네트워크 오류 등) 다시 요청
   useEffect(() => {
@@ -303,6 +386,8 @@ export function BattlePlay({
       }
       const taken = new Set<number>(pendingRef.current);
       for (const k of Object.keys(r.claims ?? {})) taken.add(Number(k));
+      for (const [wi, h] of coopHits(r.claims)) if (h[meId] !== undefined) taken.add(wi); // 내가 이미 친 협동 낱말
+      if (!underdogRef.current) for (const x of schedule) if (x.comeback) taken.add(x.index); // 역전 찬스는 하위권만
       const w = matchSubmission(schedule, t, typed, taken);
       if (!w) {
         streak.current = 0;
@@ -325,7 +410,17 @@ export function BattlePlay({
         return { kind: 'miss' };
       }
       pendingRef.current.add(w.index);
-      const ok = await driverRef.current.claim(w.index);
+      let ok = false;
+      if (w.coop) {
+        // 협동 낱말: 이 낱말의 빈 칸에 내 기록을 남긴다(동시에 쓴 사람이 있으면 다음 칸)
+        const tried: Record<string, true> = {};
+        for (let k = 0; k < 20 && !ok; k++) {
+          const idx = nextCoopIndex(w.index, { ...(roomRef.current.claims ?? {}), ...tried });
+          if (idx < 0) break;
+          ok = await driverRef.current.claim(idx);
+          tried[String(idx)] = true;
+        }
+      } else ok = await driverRef.current.claim(w.index);
       if (!ok) {
         pendingRef.current.delete(w.index);
         streak.current = 0;
@@ -351,6 +446,7 @@ export function BattlePlay({
         }
       }
       setPower(powerRef.current);
+      if (w.coop) return { kind: 'info', text: `🤝 협동! 모두 치면 ×${w.coopMult}` };
       return { kind: 'ok', points: w.score };
     },
     [schedule, durMs, meId],
@@ -363,7 +459,9 @@ export function BattlePlay({
       const s = normalizeText(base).trim().replace(/\s+/g, ' ');
       if (!s || t < 0) return false;
       const claims = r.claims ?? {};
-      const vis = visibleWords(schedule, t).filter((w) => !claims[String(w.index)] && !pendingRef.current.has(w.index));
+      const vis = visibleWords(schedule, t).filter(
+        (w) => !claims[String(w.index)] && !pendingRef.current.has(w.index) && !(w.comeback && !underdogRef.current),
+      );
       if (vis.some((w) => w.text === s)) return false;
       if (phraseKey(setRef.current.freezePhrase ?? '').startsWith(s + ' ')) return true; // 멈추기 문장을 치는 중
       return vis.some((w) => w.text.startsWith(s + ' '));
@@ -406,6 +504,12 @@ export function BattlePlay({
   // ── 점수판 ──
   const ranks = useMemo(() => rankPlayers(room, schedule), [room, schedule]);
   const mine = ranks.find((r) => r.id === meId);
+  const underdog = useMemo(() => isUnderdog(ranks, meId), [ranks, meId]);
+  useLayoutEffect(() => {
+    underdogRef.current = underdog;
+  }, [underdog]);
+  const teamMode = room.mode === 'team';
+  const teamPts = useMemo(() => teamScores(ranks), [ranks]);
   const last = !ended && countdown === 0 && remain <= LAST_SEC;
   const active = !ended && countdown === 0;
   const frozen = active && !!freezeBy && freezeBy !== meId; // 남이 건 멈추기
@@ -423,8 +527,14 @@ export function BattlePlay({
     return () => stopBgm();
   }, [active, bgmOn, soundOn]);
   useEffect(() => {
-    setBgmFast(last);
-  }, [last]);
+    setBgmFast(last || fever);
+  }, [last, fever]);
+  useEffect(() => {
+    if (fever) playFever();
+  }, [fever]);
+  useEffect(() => {
+    if (twist) playTwist();
+  }, [twist]);
 
   // ── 효과음: 카운트다운·시작·마지막 20초·마지막 5초·종료 (값이 바뀌는 순간에만) ──
   const snd = useRef({ countdown, remain, last, ended });
@@ -467,8 +577,20 @@ export function BattlePlay({
           </div>
         </div>
 
-        <div className={`relative min-h-0 flex-1 overflow-hidden border-2 border-miss/40 transition-colors duration-700 ${last ? 'bg-miss/10' : 'bg-white/[0.03]'}`}>
+        <div className={`relative min-h-0 flex-1 overflow-hidden border-2 border-miss/40 transition-colors duration-700 ${fever && active ? 'bg-orange-500/15' : last ? 'bg-miss/10' : 'bg-white/[0.03]'}`}>
           <div ref={layerRef} className="absolute inset-0" />
+          {active && twist === 'fog' && (
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[64%] w-[60%] -translate-x-1/2 -translate-y-1/2 rounded-[50%] bg-slate-400 blur-2xl" />
+          )}
+          {active && (fever || twist) && (
+            <div
+              className={`pointer-events-none absolute bottom-7 left-1/2 -translate-x-1/2 animate-pulse rounded-full px-5 py-1 text-lg font-black ${
+                fever ? 'bg-orange-500 text-white' : 'bg-slate-200 text-ink'
+              }`}
+            >
+              {fever ? '🔥 피버 타임! 점수 2배' : twist === 'fog' ? '🌫️ 안개 주의!' : '🙃 거꾸로!'}
+            </div>
+          )}
           {countdown > 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-ink/60">
               <div className="text-lg text-white/70">곧 시작해요! 입력창에 손을 올리세요</div>
@@ -554,9 +676,18 @@ export function BattlePlay({
 
       <aside className="flex w-72 shrink-0 flex-col bg-black/20 p-4">
         <div className="mb-2 flex items-baseline justify-between">
-          <div className="font-bold">순위</div>
+          <div className="font-bold">순위{teamMode ? ' · 팀전' : ''}</div>
           <div className="text-xs text-white/40">{room.startCount}명</div>
         </div>
+        {teamMode && (
+          <div className="mb-2 grid grid-cols-2 gap-1.5 text-center text-sm font-black">
+            {TEAM_NAMES.map((name, i) => (
+              <div key={name} className={`rounded-lg py-1.5 ${i === 0 ? 'bg-rose-500/80' : 'bg-sky-500/80'} ${mine?.team === i ? 'ring-2 ring-white' : ''}`}>
+                {name} <span className="tabular-nums">{teamPts[i]}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <ol className="min-h-0 flex-1 space-y-1 overflow-hidden">
           {ranks.map((r) => {
             const me = r.id === meId;
@@ -571,6 +702,7 @@ export function BattlePlay({
                 title={off ? '접속 끊김' : undefined}
               >
                 <span className="w-5 text-right tabular-nums text-white/60">{r.place}</span>
+                {teamMode && r.team >= 0 && <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${TEAM_DOT[r.team]}`} />}
                 <span className="min-w-0 flex-1 truncate">
                   {r.name}
                   {me ? ' (나)' : ''}
@@ -587,6 +719,9 @@ export function BattlePlay({
             <span className="text-white/45">■ 1점</span> <span className="text-white">■ 2점</span> <span className="text-gold">■ 4점</span>
           </div>
           <div className="mt-0.5 text-[11px] text-sky-300/80">⚡빠름 +1 · 👻깜빡 +2 · 🌀흔들 +1 · ★황금 2배</div>
+          <div className="mt-0.5 text-[11px] text-mint-300">🤝 협동: 모두 치면 모두 ×2~4</div>
+          <div className="mt-0.5 text-[11px] text-sky-300/80">📖 뜻 낱말 +2 · 🔥 피버 2배</div>
+          {underdog && <div className="mt-1 rounded-md bg-fuchsia-600/80 px-1 py-0.5 text-[11px] font-bold">🚀 역전 찬스 낱말(+4)이 보여요!</div>}
         </div>
       </aside>
     </div>

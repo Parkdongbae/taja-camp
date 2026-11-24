@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   BATTLE_DURATIONS,
+  COOP_FALL,
+  COOP_INDEX_BASE,
   FAST_MULT,
+  coopDone,
+  coopHits,
+  coopRequired,
+  coopWordOf,
+  nextCoopIndex,
   POWER_INDEX_BASE,
   buildSchedule,
   concurrentCount,
   isPowerIndex,
+  laneCount,
   nextPowerIndex,
   normalizeDuration,
   wordAlpha,
@@ -18,6 +26,7 @@ import {
   type FallingWord,
 } from './battle';
 import { battlePoints } from './scoring';
+import { battleEvents, feverAt, isUnderdog, teamOf, twistAt, FEVER_MS, TWIST_MS } from './events';
 import { seedFromString, shuffle } from './rng';
 
 const POOL = [
@@ -105,11 +114,81 @@ describe('깜빡·흔들·파워·경기 시간', () => {
     expect(nextPowerIndex(undefined)).toBe(POWER_INDEX_BASE);
     expect(nextPowerIndex({ '5': 1, [String(POWER_INDEX_BASE)]: 1 })).toBe(POWER_INDEX_BASE + 1);
   });
+  it('협동 칸 번호와 집계', () => {
+    expect(coopWordOf(5)).toBe(-1);
+    expect(coopWordOf(POWER_INDEX_BASE)).toBe(-1);
+    expect(isPowerIndex(COOP_INDEX_BASE)).toBe(false);
+    const k0 = nextCoopIndex(7, {});
+    expect(k0).toBe(COOP_INDEX_BASE + 700);
+    expect(coopWordOf(k0)).toBe(7);
+    expect(nextCoopIndex(7, { [String(k0)]: 1 })).toBe(k0 + 1);
+    const claims = {
+      '3': { by: 'a', at: 1 },
+      [String(k0)]: { by: 'a', at: 10 },
+      [String(k0 + 1)]: { by: 'b', at: 20 },
+      [String(k0 + 2)]: { by: 'a', at: 30 }, // 같은 사람이 두 번 → 이른 쪽
+    };
+    const h = coopHits(claims);
+    expect([...h.keys()]).toEqual([7]);
+    expect(h.get(7)).toEqual({ a: 10, b: 20 });
+    const req = coopRequired({ a: { online: true }, b: {}, c: { online: false } });
+    expect(req).toEqual(['a', 'b']);
+    expect(coopDone(h.get(7), req)).toBe(true);
+    expect(coopDone(h.get(7), ['a', 'b', 'c'])).toBe(false);
+    expect(coopDone(undefined, req)).toBe(false);
+    expect(coopDone(h.get(7), [])).toBe(false);
+  });
   it('경기 시간은 목록에 있는 값만, 아니면 120초', () => {
     for (const d of BATTLE_DURATIONS) expect(normalizeDuration(d)).toBe(d);
     expect(normalizeDuration(77)).toBe(120);
     expect(normalizeDuration(undefined)).toBe(120);
     expect(normalizeDuration('180')).toBe(180);
+  });
+});
+
+describe('경기 중 이벤트·팀·역전 대상', () => {
+  it('battleEvents: 결정적, 피버 10초, 안개·거꾸로는 겹치지 않고 경기 안', () => {
+    for (const dur of [60, 90, 120, 180, 300]) {
+      for (let seed = 1; seed <= 40; seed++) {
+        const ev = battleEvents(seed, dur);
+        expect(ev).toEqual(battleEvents(seed, dur));
+        const f = ev.fever!;
+        expect(f.end - f.start).toBe(FEVER_MS);
+        expect(f.start).toBeGreaterThanOrEqual(dur * 450 - 500);
+        expect(f.end).toBeLessThanOrEqual(dur * 1000);
+        expect(new Set(ev.twists.map((t) => t.kind)).size).toBe(ev.twists.length);
+        for (const t of ev.twists) {
+          expect(t.end - t.start).toBe(TWIST_MS);
+          expect(t.start).toBeGreaterThanOrEqual(15000);
+          expect(t.end).toBeLessThanOrEqual(dur * 1000 - 19000);
+          expect(t.end <= f.start || t.start >= f.end).toBe(true);
+        }
+        if (dur >= 120) expect(ev.twists.length).toBe(2);
+      }
+    }
+    expect(battleEvents(1, 30)).toEqual({ fever: null, twists: [] });
+  });
+  it('feverAt / twistAt', () => {
+    const ev = battleEvents(7, 120);
+    expect(feverAt(ev, ev.fever!.start)).toBe(true);
+    expect(feverAt(ev, ev.fever!.end)).toBe(false);
+    expect(feverAt(ev, 0)).toBe(false);
+    expect(twistAt(ev, ev.twists[0].start + 1)).toBe(ev.twists[0].kind);
+    expect(twistAt(ev, 0)).toBeNull();
+  });
+  it('teamOf: 들어온 순서대로 번갈아', () => {
+    expect(teamOf({ b: { joinedAt: 2 }, a: { joinedAt: 1 }, d: { joinedAt: 3 }, c: { joinedAt: 3 } })).toEqual({ a: 0, b: 1, c: 0, d: 1 });
+    expect(teamOf(undefined)).toEqual({});
+  });
+  it('isUnderdog: 아래 30% 이고 1등보다 점수가 낮을 때만', () => {
+    const r = (scores: number[]) => scores.map((score, i) => ({ id: String(i), score, place: i + 1 }));
+    expect(isUnderdog(r([10, 5]), '1')).toBe(true);
+    expect(isUnderdog(r([10, 5]), '0')).toBe(false);
+    expect(isUnderdog(r([10, 8, 5, 2]), '1')).toBe(false);
+    expect(isUnderdog(r([10, 8, 5, 2]), '2')).toBe(true);
+    expect(isUnderdog(r([10, 8, 5, 2]), '3')).toBe(true);
+    expect(isUnderdog([{ id: 'a', score: 0, place: 1 }, { id: 'b', score: 0, place: 1 }], 'b')).toBe(false);
+    expect(isUnderdog(r([10]), '0')).toBe(false);
   });
 });
 
@@ -142,7 +221,7 @@ describe('buildSchedule', () => {
   });
   it('fallMs 는 10000 에서 6000 쪽으로 줄어든다', () => {
     expect(s16[0].fallMs).toBe(10000);
-    const slow = s16.filter((w) => !w.fast); // 빠른 낱말은 따로 확인
+    const slow = s16.filter((w) => !w.fast && !w.coop); // 빠른 낱말·협동 낱말은 따로 확인
     for (let i = 1; i < slow.length; i++) expect(slow[i].fallMs).toBeLessThanOrEqual(slow[i - 1].fallMs);
     const last = slow[slow.length - 1];
     expect(last.fallMs).toBeGreaterThanOrEqual(6000);
@@ -174,15 +253,15 @@ describe('buildSchedule', () => {
   }
   it.each([1, 2, 5, 9, 16])('인원 %i: 같은 낱말 동시 2개 없음, 가로 위치 겹침 없음', (n) => {
     const s = buildSchedule(7, POOL, n, 120);
-    checkAt(s, concurrentCount(n) + 2);
+    checkAt(s, laneCount(n));
   });
-  it.each([2, 8, 16])('인원 %i: 동시에 떠 있는 수 ≈ 3 + 인원(빠른 낱말만큼 줄 수 있음)', (n) => {
+  it.each([2, 8, 16])('인원 %i: 동시에 떠 있는 수 ≈ 3 + 인원(빠른 낱말만큼 줄고, 느린 협동 낱말만큼 늘 수 있음)', (n) => {
     const s = buildSchedule(11, POOL, n, 120);
     const c = concurrentCount(n);
     let maxVis = 0;
     for (let t = 15000; t < 110000; t += 250) maxVis = Math.max(maxVis, visibleWords(s, t).length);
     expect(maxVis).toBeGreaterThanOrEqual(c);
-    expect(maxVis).toBeLessThanOrEqual(c + 1);
+    expect(maxVis).toBeLessThanOrEqual(Math.ceil(c * 1.7) + 3); // 피버 동안은 더 많이 뜬다
   });
   it('4점 낱말이 최소 10%', () => {
     const pool = [...POOL.slice(0, 22), '지구 온난화'];
@@ -206,7 +285,7 @@ describe('buildSchedule', () => {
   it('낱말이 아주 적어도 동시 중복 없이 동작', () => {
     const s = buildSchedule(3, ['나라', '광합성'], 16, 120);
     expect(s.length).toBeGreaterThan(0);
-    checkAt(s, concurrentCount(16) + 2);
+    checkAt(s, laneCount(16));
   });
   it('빈 pool·칠 수 없는 낱말뿐이면 빈 일정', () => {
     expect(buildSchedule(1, [], 4, 120)).toEqual([]);
@@ -223,7 +302,7 @@ describe('buildSchedule', () => {
     }
     expect(new Set(s16.map((w) => w.dir))).toEqual(new Set(['down', 'up', 'left', 'right']));
     for (const w of s16) {
-      const bonus = (w.fast ? 1 : 0) + (w.blink ? 2 : 0) + (w.zigzag ? 1 : 0) + (w.golden ? w.points : 0);
+      const bonus = (w.fast ? 1 : 0) + (w.blink ? 2 : 0) + (w.zigzag ? 1 : 0) + (w.golden ? w.points : 0) + (w.comeback ? 4 : 0) + (w.riddle ? 2 : 0);
       expect(w.bonus).toBe(bonus);
       expect(w.score).toBe(w.points + bonus);
     }
@@ -233,10 +312,50 @@ describe('buildSchedule', () => {
       expect(n / s16.length, k).toBeLessThan(0.3);
     }
   });
+  it('협동 낱말: 2명 이상일 때만, 다른 효과 없음, 느릴수록 배수가 낮다', () => {
+    expect(buildSchedule(42, POOL, 1, 120).some((w) => w.coop)).toBe(false);
+    const co = s16.filter((w) => w.coop);
+    expect(co.length).toBeGreaterThan(3);
+    expect(co.length / s16.length).toBeLessThan(0.15);
+    expect(new Set(co.map((w) => w.coopMult))).toEqual(new Set([2, 3, 4]));
+    for (const w of co) {
+      expect(w.fast || w.blink || w.zigzag || w.golden).toBe(false);
+      expect(w.bonus).toBe(0);
+    }
+    for (const w of s16) if (!w.coop) expect(w.coopMult).toBe(0);
+    for (const w of s16.slice(0, 3)) expect(w.coop).toBe(false);
+  });
+  it('역전 찬스 낱말: 2명 이상·경기 25% 이후, 다른 효과 없이 +4', () => {
+    expect(buildSchedule(42, POOL, 1, 120).some((w) => w.comeback)).toBe(false);
+    const cb = s16.filter((w) => w.comeback);
+    expect(cb.length).toBeGreaterThan(2);
+    for (const w of cb) {
+      expect(w.spawnAt).toBeGreaterThan(30000);
+      expect(w.fast || w.blink || w.zigzag || w.golden || w.coop || w.riddle).toBe(false);
+      expect(w.score).toBe(w.points + 4);
+    }
+  });
+  it('뜻 낱말: opts.riddles 에 있는 낱말만, 없으면 일정이 그대로', () => {
+    expect(s16.some((w) => w.riddle)).toBe(false);
+    const withR = buildSchedule(42, POOL, 16, 120, null, { riddles: ['광합성', ' 세포 ', '분자', '원자', '지층', '화산', '기후', '대륙'] });
+    const rd = withR.filter((w) => w.riddle);
+    expect(rd.length).toBeGreaterThan(0);
+    for (const w of rd) {
+      expect(['광합성', '세포', '분자', '원자', '지층', '화산', '기후', '대륙']).toContain(w.text);
+      expect(w.blink || w.coop || w.comeback).toBe(false);
+    }
+    expect(withR.map((w) => ({ ...w, riddle: false, bonus: 0, score: 0 }))).toEqual(s16.map((w) => ({ ...w, riddle: false, bonus: 0, score: 0 })));
+  });
+  it('피버 동안에는 낱말이 더 자주 나온다', () => {
+    const ev = battleEvents(42, 120);
+    const inF = s16.filter((w) => feverAt(ev, w.spawnAt)).length / 10;
+    const before = s16.filter((w) => w.spawnAt >= ev.fever!.start - 10000 && w.spawnAt < ev.fever!.start).length / 10;
+    expect(inF).toBeGreaterThan(before * 1.3);
+  });
   it('빠른 낱말은 낙하 시간이 1.7배 짧다', () => {
     for (const w of s16) {
       const base = fallMsAt(w.spawnAt, 120000);
-      expect(w.fallMs).toBe(Math.round(base / (w.fast ? FAST_MULT : 1)));
+      expect(w.fallMs).toBe(Math.round((base / (w.fast ? FAST_MULT : 1)) * (w.coopMult ? COOP_FALL[w.coopMult] : 1)));
     }
   });
   it('효과는 낱말·등장 시각·위치를 바꾸지 않는다(인원만 같으면 같은 뼈대)', () => {
@@ -264,6 +383,10 @@ describe('visibleWords / wordY / matchSubmission', () => {
     golden: false,
     bonus: 0,
     score: 2,
+    coop: false,
+    coopMult: 0,
+    comeback: false,
+    riddle: false,
   });
   const sched = [w(0, '세포', 0), w(1, '분자', 2000), w(2, '세포', 11000)];
   it('visibleWords', () => {

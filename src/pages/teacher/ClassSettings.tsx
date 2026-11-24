@@ -1,8 +1,11 @@
 // 수업 설정: backend.watchSettings 로 읽고, 바꾸면 바로 updateSettings 로 저장한다.
 // 배틀 멈추기(문장·초)와 바른 말(욕설 제재 켜기·초·추가 낱말)도 여기서 정한다.
-import { useEffect, useRef, useState } from 'react';
+// 연습·배틀 콘텐츠: 과목·단원을 여러 개 골라 Settings.contentPick 에 저장한다(모두 고르거나 하나도 안 고르면 전체 = 빈 목록).
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { backend } from '../../data';
-import { AppError, DEFAULT_SETTINGS, type Settings } from '../../data/types';
+import { AppError, DEFAULT_SETTINGS, SUBJECT_LABEL, type Settings, type Subject } from '../../data/types';
+import { useContent } from '../../content';
+import { contentGroups, type ContentGroup } from '../../content/pick';
 import { Card } from '../../components/ui';
 import { BAD_WORD_COUNT, findBadWord, squash } from '../../engine/badwords';
 import { FALL_SPEED_MAX, FALL_SPEED_MIN, fallMsAt, normalizeFallSpeed } from '../../engine/battle';
@@ -69,6 +72,104 @@ function Slider({
         {v}
         {unit}
       </span>
+    </div>
+  );
+}
+
+// 연습·배틀에 낼 콘텐츠 고르기(과목·단원, 여러 개). pick 이 비어 있으면 전체.
+function ContentPicker({ pick, onChange }: { pick: string[]; onChange: (p: string[]) => void }) {
+  const allWords = useContent((s) => s.allWords);
+  const allSentences = useContent((s) => s.allSentences);
+  const allPassages = useContent((s) => s.allPassages);
+  const groups = useMemo(() => contentGroups(allWords, allSentences, allPassages), [allWords, allSentences, allPassages]);
+  const allKeys = useMemo(() => groups.map((g) => g.key), [groups]);
+  const everything = pick.length === 0 || allKeys.every((k) => pick.includes(k));
+  const sel = useMemo(() => new Set(everything ? allKeys : pick), [everything, allKeys, pick]);
+  const bySubject = useMemo(() => {
+    const m = new Map<Subject, ContentGroup[]>();
+    for (const g of groups) m.set(g.subject, [...(m.get(g.subject) ?? []), g]);
+    return [...m.entries()];
+  }, [groups]);
+
+  // 모두 고르거나 하나도 안 고르면 "전체"(빈 목록)로 저장한다
+  const commit = (next: Set<string>) => {
+    const list = allKeys.filter((k) => next.has(k));
+    onChange(list.length === 0 || list.length === allKeys.length ? [] : list);
+  };
+  const toggle = (keys: string[], on: boolean) => {
+    const next = new Set(sel);
+    for (const k of keys) {
+      if (on) next.add(k);
+      else next.delete(k);
+    }
+    commit(next);
+  };
+  const total = groups.filter((g) => sel.has(g.key)).reduce((a, g) => ({ w: a.w + g.words, s: a.s + g.sentences, p: a.p + g.passages }), { w: 0, s: 0, p: 0 });
+
+  return (
+    <div className="py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm text-ink/70">
+          {everything ? <b className="text-mint-700">전체 콘텐츠 사용 중</b> : <b className="text-mint-700">고른 콘텐츠만 사용 중</b>} · 낱말 {total.w}개 · 단문 {total.s}개 · 장문{' '}
+          {total.p}개
+        </div>
+        <button
+          onClick={() => onChange([])}
+          disabled={everything}
+          className="rounded-xl bg-mint-500 px-3 py-1.5 text-sm font-bold text-white hover:bg-mint-600 disabled:opacity-40"
+        >
+          전체 선택
+        </button>
+      </div>
+      <div className="mt-3 space-y-3">
+        {bySubject.map(([subject, list]) => {
+          const keys = list.map((g) => g.key);
+          const n = keys.filter((k) => sel.has(k)).length;
+          return (
+            <fieldset key={subject} className="rounded-xl border border-mint-100 p-3">
+              <legend className="px-1">
+                <label className="flex cursor-pointer items-center gap-2 font-bold">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-mint-500"
+                    checked={n === keys.length}
+                    ref={(el) => {
+                      if (el) el.indeterminate = n > 0 && n < keys.length;
+                    }}
+                    onChange={(e) => toggle(keys, e.target.checked)}
+                  />
+                  {SUBJECT_LABEL[subject] ?? subject}
+                  <span className="text-xs font-normal text-ink/50">
+                    {n}/{keys.length} 단원
+                  </span>
+                </label>
+              </legend>
+              <div className="flex flex-wrap items-center gap-2">
+                {list.map((g) => (
+                  <label
+                    key={g.key}
+                    title={`낱말 ${g.words} · 단문 ${g.sentences} · 장문 ${g.passages}`}
+                    className={`flex cursor-pointer items-center gap-1.5 rounded-full border-2 px-3 py-1 text-sm transition ${
+                      sel.has(g.key) ? 'border-mint-500 bg-mint-50 font-bold text-mint-700' : 'border-ink/10 text-ink/50'
+                    }`}
+                  >
+                    <input type="checkbox" className="h-3.5 w-3.5 accent-mint-500" checked={sel.has(g.key)} onChange={(e) => toggle([g.key], e.target.checked)} />
+                    {g.unit || '(단원 없음)'}
+                    <span className="text-xs font-normal text-ink/40">{g.words + g.sentences + g.passages}</span>
+                  </label>
+                ))}
+                <button onClick={() => commit(new Set(keys))} className="ml-auto text-xs font-bold text-mint-700 underline-offset-2 hover:underline">
+                  이 과목만
+                </button>
+              </div>
+            </fieldset>
+          );
+        })}
+      </div>
+      <div className="mt-3 text-xs text-ink/50">
+        낱말·단문·장문 연습, 뜻 맞추기, 배틀에 고른 콘텐츠만 나와요. 고른 콘텐츠에 한국어(또는 영어) 자료가 하나도 없으면 그 언어는 전체 콘텐츠로 진행합니다. 수행평가 글과
+        진행 중인 배틀에는 영향이 없어요.
+      </div>
     </div>
   );
 }
@@ -256,6 +357,11 @@ export default function ClassSettings() {
         <Row title="소리 허용" desc="타건음과 배틀 효과음. 끄면 학생이 소리를 켤 수 없어요.">
           <Toggle label="소리 허용" on={s.soundAllowed} onChange={(v) => void save({ soundAllowed: v })} />
         </Row>
+      </Card>
+
+      <h2 className="pt-2 text-lg font-black">연습·배틀 콘텐츠</h2>
+      <Card className={loaded ? '' : 'opacity-60'}>
+        <ContentPicker pick={s.contentPick ?? []} onChange={(list) => void save({ contentPick: list })} />
       </Card>
 
       <h2 className="pt-2 text-lg font-black">배틀 낱말 속도</h2>

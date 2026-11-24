@@ -1,13 +1,14 @@
 // 컴퓨터 대결(연습 배틀, /battle/solo). 서버 방 없이 전부 이 브라우저에서 진행한다.
 // - 나 + 컴퓨터 3명(새내기·맞수·고수). 봇 타수는 engine/bots 의 botBaseKpm(최고 타수·계급 RP·solo.level) × 0.8/1.0/1.15.
 // - seed 무작위, 시간은 performance.now, claims 는 로컬 상태. 봇은 createBotRunner 로 매 프레임 진행.
+// - 협동 낱말은 봇도 각자 친다(planBotCoop 의 시각에 협동 칸에 기록). 봇 진행기에는 협동 낱말을 뺀 일정을 준다.
 // - 끝나면 finishBattle({ practice: true }) → RP 절반, 실제 전적 제외, solo.level ±1.
 // - 경기 중에 떠나거나 새로 고침하면 그 판은 무효(아무것도 저장하지 않음).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BATTLE_DURATION_SEC, type BattleRoom, type Lang, type Student } from '../data/types';
-import { buildSchedule, normalizeFallSpeed, type FallingWord } from '../engine/battle';
-import { botBaseKpm, createBotRunner, makeBots, nextSoloLevel, SOLO_LEVEL_MAX, SOLO_LEVEL_MIN, type Bot, type BotClaim } from '../engine/bots';
+import { buildSchedule, nextCoopIndex, normalizeFallSpeed, type FallingWord } from '../engine/battle';
+import { botBaseKpm, createBotRunner, makeBots, nextSoloLevel, planBotCoop, SOLO_LEVEL_MAX, SOLO_LEVEL_MIN, type Bot, type BotClaim } from '../engine/bots';
 import { rankPlayers, tierOf, type BattleRank } from '../engine/scoring';
 import { isBattleUnlocked, isEnBattleUnlocked } from '../engine/stages';
 import { useAuth } from '../state/auth';
@@ -15,7 +16,7 @@ import { finishBattle, type BattleFinish } from '../state/record';
 import { useContent } from '../content';
 import { BattlePlay, type BattleDriver } from '../components/battle/BattlePlay';
 import { BattleResult } from '../components/battle/BattleResult';
-import { battlePool, readBattleLang, type LobbyState } from '../components/battle/battleUtil';
+import { battlePool, battleRiddles, readBattleLang, type LobbyState } from '../components/battle/battleUtil';
 
 const BOT_ICON = '🤖 ';
 
@@ -77,12 +78,24 @@ function SoloMatch({ lang, student, onAgain, onExit }: { lang: Lang; student: St
   });
 
   const schedule = useMemo<FallingWord[]>(
-    () => buildSchedule(setup.room.seed, battlePool(words, lang), setup.room.startCount, BATTLE_DURATION_SEC, setup.room.fall),
+    () =>
+      buildSchedule(setup.room.seed, battlePool(words, lang), setup.room.startCount, BATTLE_DURATION_SEC, setup.room.fall, {
+        riddles: battleRiddles(words, lang).keys(),
+      }),
     // 판 도중 콘텐츠가 바뀌어도 일정은 그대로
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
-  const [runner] = useState(() => createBotRunner(schedule, setup.bots, (setup.room.seed ^ 0x5bd1e995) >>> 0, durMs));
+  const [runner] = useState(() =>
+    createBotRunner(
+      schedule.filter((w) => !w.coop && !w.comeback), // 협동은 따로, 역전 찬스는 학생 몫
+      setup.bots,
+      (setup.room.seed ^ 0x5bd1e995) >>> 0,
+      durMs,
+    ),
+  );
+  const [coopPlan] = useState(() => planBotCoop(schedule, setup.bots, (setup.room.seed ^ 0x27d4eb2f) >>> 0, durMs));
+  const coopPtr = useRef(0);
   const [room, setRoom] = useState<BattleRoom>(setup.room);
   const claimsRef = useRef<BattleRoom['claims']>({});
   const freezesRef = useRef<NonNullable<BattleRoom['freezes']>>({});
@@ -95,11 +108,19 @@ function SoloMatch({ lang, student, onAgain, onExit }: { lang: Lang; student: St
   const advance = useCallback(
     (elapsed: number) => {
       const got: BotClaim[] = runner.step(elapsed, claimsRef.current);
-      if (!got.length) return false;
       for (const c of got) claimsRef.current[String(c.index)] = { by: c.botId, at: startAt + c.at };
-      return true;
+      // 봇이 협동 낱말을 치는 시각이 지났으면 협동 칸에 기록
+      let coop = false;
+      while (coopPtr.current < coopPlan.length && coopPlan[coopPtr.current].at <= elapsed) {
+        const c = coopPlan[coopPtr.current++];
+        const k = nextCoopIndex(c.index, claimsRef.current);
+        if (k < 0) continue;
+        claimsRef.current[String(k)] = { by: c.botId, at: startAt + c.at };
+        coop = true;
+      }
+      return got.length > 0 || coop;
     },
-    [runner, startAt],
+    [runner, startAt, coopPlan],
   );
 
   const driver = useMemo<BattleDriver>(

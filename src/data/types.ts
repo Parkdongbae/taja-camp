@@ -168,6 +168,8 @@ export interface Settings {
   badWordsExtra?: string[];
   /** 배틀 점수별 낙하 속도(%). 방이 시작될 때 방에 복사된다 */
   fallSpeed?: FallSpeed;
+  /** 연습·배틀에 낼 콘텐츠("과목|단원" 키 목록, content/pick 의 pickKey). 비어 있거나 없으면 전체 */
+  contentPick?: string[];
 }
 export const DEFAULT_SETTINGS: Settings = {
   battleEnabled: true,
@@ -184,6 +186,7 @@ export const DEFAULT_SETTINGS: Settings = {
   badWordSeconds: 10,
   badWordsExtra: [],
   fallSpeed: DEFAULT_FALL_SPEED,
+  contentPick: [],
 };
 
 // ───────── 인증 ─────────
@@ -243,6 +246,8 @@ export interface BattleRoom {
   claims: Record<string, { by: string; at: number }>;
   /** 멈추기: 쓴 사람 학번 → 시작 시각(서버 ms)·길이(ms). 한 판에 한 사람 한 번 */
   freezes?: Record<string, { at: number; ms: number }>;
+  /** 경기 방식. 'team' 이면 팀전(들어온 순서대로 홍·청 번갈아). 없으면 개인전 */
+  mode?: 'ffa' | 'team';
   /** 이 판의 점수별 낙하 속도(%). 시작할 때 설정에서 복사(모든 참가자가 같은 일정을 만들기 위해). 없으면 100 */
   fall?: FallSpeed;
 }

@@ -18,6 +18,10 @@
 //         반응 400~900ms + 타수 ÷ (kpm/60) 초 × 흔들림 0.85~1.25 (+7% 확률 오타 600ms) 뒤에 완성.
 //       - 완성 전에 바닥에 닿으면 실패, 다른 사람이 먼저 가져가면 그 시점에 포기하고 새로 고른다.
 //       - durationMs 이후에는 가져가지 않는다.
+//   planBotCoop(schedule, bots, seed, durationMs?): BotClaim[]   협동 낱말을 봇이 치는 시각(시간순). 봇마다 낱말마다
+//       낱말이 떠 있는 시간의 20~70% 지점에 치고(타수가 느린 봇일수록 늦게), 8% 는 놓친다. 경기 안일 때만.
+//       (봇은 도우미라서 학생이 제때 치면 대부분 성공하도록 낱말 속도에 맞춘다)
+//       (createBotRunner 에는 협동 낱말을 뺀 일정을 넘길 것)
 //   planBotClaims(schedule, bots, seed, durationMs?): BotClaim[]   학생 없이 봇끼리만 끝까지 돌린 계획(테스트·미리보기용)
 import type { Lang, Student } from '../data/types';
 import type { FallingWord } from './battle';
@@ -205,6 +209,22 @@ export function createBotRunner(schedule: FallingWord[], bots: Bot[], seed: numb
   }
 
   return { step, freeze };
+}
+
+export function planBotCoop(schedule: FallingWord[], bots: Bot[], seed: number, durationMs = Infinity): BotClaim[] {
+  const out: BotClaim[] = [];
+  bots.forEach((bot, bi) => {
+    const rand = mulberry32((seed ^ Math.imul(0x85ebca6b, bi + 1)) >>> 0);
+    const slow = Math.max(0, Math.min(1, (200 - bot.kpm) / 200)); // 느린 봇일수록 1 에 가깝다
+    for (const w of schedule) {
+      if (!w.coop) continue;
+      const part = 0.2 + 0.3 * slow + rand() * 0.2;
+      const miss = rand() < 0.08;
+      const at = Math.round(w.spawnAt + w.fallMs * part);
+      if (!miss && at < durationMs) out.push({ index: w.index, botId: bot.id, at });
+    }
+  });
+  return out.sort((a, b) => a.at - b.at);
 }
 
 export function planBotClaims(schedule: FallingWord[], bots: Bot[], seed: number, durationMs = Infinity): BotClaim[] {

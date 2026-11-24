@@ -60,6 +60,8 @@
             "$other": { ".validate": false }
           }
         },
+        // 경기 방식(개인전·팀전). 대기 중에 방장이 고른다.
+        "mode": { ".validate": "newData.val() === 'ffa' || newData.val() === 'team'" },
         "fall": {
           // 점수별 낙하 속도(%). 시작할 때 방장이 수업 설정에서 복사한다.
           "p1": { ".validate": "newData.isNumber() && newData.val() >= 50 && newData.val() <= 200" },

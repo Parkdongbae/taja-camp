@@ -55,7 +55,7 @@ export default function Exam() {
   const nav = useNavigate();
   const student = useAuth((s) => s.student);
   const settings = useAuth((s) => s.settings);
-  const passages = useContent((s) => s.passages);
+  const passages = useContent((s) => s.allPassages); // 수행평가 글은 콘텐츠 선택과 무관
   const loaded = useContent((s) => s.loaded);
   const cfg = { ...DEFAULT_EXAM, ...settings.exam };
   const langs: Lang[] = cfg.langs.length ? cfg.langs : ['ko'];

@@ -8,7 +8,8 @@
 //   배틀: playTick(high?) 카운트다운 "삑" · playStart() 시작 · playScore(1|2|4) 낱말 획득 · playCombo(n) 연속 획득
 //         playLate() 한발 늦음 · playWarn() 마지막 20초 · playEnd() 경기 종료
 //         playFreeze() 멈추기 발동 · playAlarm() 욕설 경고 · playPower(mine) 포인트 회수(내가 쓰면 상승, 당하면 하강)
-//         playBonus() 특수 낱말 획득
+//         playBonus() 특수 낱말 획득 · playCoop() 협동 낱말 성공
+//         playFever() 피버 시작 · playTwist() 안개·거꾸로 시작
 //   soundEnabled() 지금 소리를 내도 되는가 (usePrefs.sound 와 useAuth.settings.soundAllowed)
 // 소리가 꺼져 있거나 Web Audio 를 쓸 수 없으면 아무것도 하지 않는다. 음량은 usePrefs.volume, 테마는 usePrefs.soundTheme.
 import { usePrefs, type SoundTheme } from '../state/prefs';
@@ -236,4 +237,28 @@ export function playBonus(): void {
   if (!r) return;
   tone(r, 'sine', 2093, 2637, 0.12, 0.16, 0.1);
   tone(r, 'sine', 3136, 3136, 0.2, 0.1, 0.18);
+}
+
+/** 협동 낱말 성공: 화음이 함께 울린다. */
+export function playCoop(): void {
+  const r = ready();
+  if (!r) return;
+  [523.25, 659.25, 783.99].forEach((f) => tone(r, 'triangle', f, f, 0.5, 0.16));
+  tone(r, 'sine', 1046.5, 1046.5, 0.6, 0.14, 0.12);
+}
+
+/** 피버 시작: 빠르게 치솟는 음. */
+export function playFever(): void {
+  const r = ready();
+  if (!r) return;
+  [659.25, 783.99, 987.77, 1318.5].forEach((f, i) => tone(r, 'square', f, f, 0.1, 0.14, i * 0.06));
+  tone(r, 'sawtooth', 1318.5, 2637, 0.4, 0.12, 0.24);
+}
+
+/** 안개·거꾸로 시작: 흔들리듯 내려갔다 올라오는 음. */
+export function playTwist(): void {
+  const r = ready();
+  if (!r) return;
+  tone(r, 'sine', 880, 440, 0.25, 0.22);
+  tone(r, 'sine', 440, 660, 0.25, 0.22, 0.25);
 }

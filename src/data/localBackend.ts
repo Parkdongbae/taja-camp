@@ -683,6 +683,16 @@ export function createLocalBackend(): Backend {
       });
     },
 
+    async setRoomMode(roomId, mode) {
+      const u = me();
+      const myId = u && u.role === 'student' ? u.studentId : null;
+      await roomLock((rs) => {
+        const r = rs[roomId];
+        if (!r || r.state !== 'waiting' || r.host !== myId) return;
+        r.mode = mode === 'team' ? 'team' : 'ffa';
+      });
+    },
+
     async startRoom(roomId, fall) {
       const u = me();
       const myId = u && u.role === 'student' ? u.studentId : null;
