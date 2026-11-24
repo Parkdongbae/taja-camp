@@ -30,6 +30,17 @@
 | 선생님 모드 | 학생 추가·삭제·일괄 등록, PIN 초기화, 학습 현황, 수업 설정(배틀 허용·임시 공개, 연습·배틀에 낼 과목·단원 고르기 등), 콘텐츠 올리기 |
 | 키보드 선택 | 데스크톱 / 노트북 / 서피스 고3 |
 
+## 우리 학교에 설치하기 (구글 계정만 있으면 됩니다)
+
+[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/Parkdongbae/taja-camp&cloudshell_tutorial=docs/SETUP.md)
+
+1. 위 버튼을 눌러 구글의 무료 웹 터미널(Cloud Shell)을 엽니다.
+2. 터미널에 `npm run setup` 한 줄을 실행합니다.
+3. 끝나면 나오는 주소(`https://taja-xxxxxxxx.web.app`)를 열고 **선생님 모드**에서 첫 계정을 만듭니다.
+
+프로젝트 만들기, 데이터베이스, 로그인 방식, 보안 규칙, 사이트 올리기까지 자동으로 합니다. 무료(Firebase Spark 요금제)이고 5~10분쯤 걸립니다.
+자세한 안내와 문제 해결은 [docs/SETUP.md](docs/SETUP.md)를 보세요.
+
 ## 실행
 
 ```bash
@@ -45,7 +56,9 @@ npm test         # 타자 엔진 단위 테스트
 npm run build    # 타입 검사 + 빌드
 ```
 
-## Firebase 연결
+## Firebase 연결 (직접 설정할 때)
+
+위 자동 설치를 쓰지 않고 손으로 연결하는 방법입니다.
 
 1. Firebase 프로젝트에서 Authentication(익명, 이메일/비밀번호), Firestore, Realtime Database 를 사용 설정합니다.
 2. `.env.example` 을 `.env` 로 복사하고 웹 앱 설정값을 채웁니다.

@@ -6,7 +6,7 @@
 - Vite + React 19 + TypeScript(strict) + Tailwind v4(`src/index.css` 의 `@theme` 토큰: `mint-50~700`, `ink`, `miss`, `gold`) + react-router-dom v7 + zustand
 - Firebase(Auth, Firestore, Realtime Database). **서버 함수·서비스 계정 없음**: 권한은 보안 규칙으로만 강제한다.
 - `.env` 에 Firebase 설정이 없으면 데모 모드(`localBackend`)로 동작한다.
-- 명령: `npm run dev`, `npm run build`(tsc 포함), `npm test`(vitest)
+- 명령: `npm run dev`, `npm run build`(tsc 포함), `npm test`(vitest), `npm run setup`(다른 학교용 자동 설치: `scripts/setup.mjs` 가 Firebase 프로젝트·DB·로그인 방식·규칙·Hosting 까지 배포. 안내는 `docs/SETUP.md`)
 
 ## 폴더와 소유
 | 경로 | 내용 |

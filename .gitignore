@@ -11,3 +11,6 @@ content-data/
 serviceAccount*.json
 .claude/
 *.tsbuildinfo
+.setup-state.json
+.firebaserc
+firebase-debug.log
