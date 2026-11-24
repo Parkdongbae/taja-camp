@@ -4,7 +4,7 @@
 //   옵션: --project <ID>  이미 만든 Firebase 프로젝트에 설치
 //         --location <Firestore 위치, 기본 asia-northeast3>      --rtdb <RTDB 위치, 기본 asia-southeast1>
 //         --skip-build  빌드 생략(이미 dist 가 있을 때)          --yes  묻지 않고 진행
-// 하는 일: ① 로그인 확인 ② Firebase 프로젝트 만들기 ③ 웹 앱 등록 ④ Firestore·Realtime Database 만들기
+// 하는 일: ① 로그인 확인 ② Firebase 프로젝트 만들기 ③ 웹 앱 등록 ④ API 켜기, Realtime Database·Firestore 만들기(scripts/rtdb-default.cjs)
 //          ⑤ .env 쓰기 ⑥ 빌드 ⑦ 로그인 방식(익명·이메일)·보안 규칙·사이트 배포 → https://<ID>.web.app
 // 다시 실행하면 .setup-state.json 에 적힌 프로젝트로 이어서(또는 새 버전으로 다시) 배포한다.
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -188,16 +188,16 @@ async function main() {
       stdio: 'ignore',
     });
   }
-  const fs = sp(NPX, [...FB, 'firestore:databases:create', '(default)', '--location', location, ...P], { encoding: 'utf8' });
-  const fsOut = `${fs.stdout}${fs.stderr}`;
-  if (fs.status === 0) say(`✔ Firestore (${location})`);
-  else if (/already exists|ALREADY_EXISTS|409/i.test(fsOut)) say('✔ Firestore (이미 있음)');
-  else fail(`Firestore 를 만들지 못했습니다.\n${fsOut.trim().split('\n').slice(-4).join('\n')}`);
-
-  // Realtime Database 기본 인스턴스는 CLI 명령이 없어 관리 API 로 만든다(gcloud 가 있을 때)
+  // Realtime Database 기본 인스턴스: CLI 명령이 없어 ① CLI 내부 함수 ② gcloud 토큰 + 관리 API ③ 직접 만들기 순서로 시도
   const inst = `${projectId}-default-rtdb`;
   let rtdbOk = false;
-  if (token) {
+  {
+    // 1순위: firebase CLI 의 로그인으로 만든다(gcloud 가 없어도 됨)
+    const r = sp(NPX, ['-y', '-p', 'firebase-tools@latest', 'node', join('scripts', 'rtdb-default.cjs'), projectId, rtdb], { encoding: 'utf8' });
+    rtdbOk = r.status === 0 && /EXISTS|CREATED/.test(r.stdout || '');
+    if (!rtdbOk) say(`  (CLI 로 만들지 못함: ${(r.stderr || r.stdout || '').trim().split('\n').slice(-1)[0] || '알 수 없음'})`);
+  }
+  if (!rtdbOk && token) {
     const api = 'https://firebasedatabase.googleapis.com/v1beta';
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'x-goog-user-project': projectId };
     try {
@@ -223,6 +223,26 @@ async function main() {
     say(`  2) [데이터베이스 만들기] → 위치 "싱가포르(asia-southeast1)" → "잠금 모드로 시작" → [사용 설정]`);
     await ask('  만들었으면 Enter 를 누르세요... ');
   }
+
+  // Firestore: API 를 막 켠 직후에는 잠시 거절될 수 있어 몇 번 다시 시도한다
+  let fsDone = false;
+  let fsOut = '';
+  for (let i = 0; i < 8 && !fsDone; i++) {
+    if (i) {
+      say('  Firestore 준비를 기다리는 중...');
+      await new Promise((r) => setTimeout(r, 15000));
+    }
+    const fs = sp(NPX, [...FB, 'firestore:databases:create', '(default)', '--location', location, ...P], { encoding: 'utf8' });
+    fsOut = `${fs.stdout}${fs.stderr}`;
+    if (fs.status === 0) {
+      say(`✔ Firestore (${location})`);
+      fsDone = true;
+    } else if (/already exists|ALREADY_EXISTS|409/i.test(fsOut)) {
+      say('✔ Firestore (이미 있음)');
+      fsDone = true;
+    } else if (!/has not been used|is disabled|403|PERMISSION_DENIED|503|UNAVAILABLE/i.test(fsOut)) break;
+  }
+  if (!fsDone) fail(`Firestore 를 만들지 못했습니다. 몇 분 뒤 npm run setup 을 다시 실행해 주세요.\n${fsOut.trim().split('\n').slice(-4).join('\n')}`);
 
   // ⑤ .env
   step(5, '설정 파일(.env) 쓰기');
