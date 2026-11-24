@@ -22,6 +22,7 @@ const BattleGame = lazy(() => import('./pages/BattleGame'));
 const BattleSolo = lazy(() => import('./pages/BattleSolo'));
 const Ranking = lazy(() => import('./pages/Ranking'));
 const MyRecord = lazy(() => import('./pages/MyRecord'));
+const NameGame = lazy(() => import('./pages/NameGame'));
 const TeacherLogin = lazy(() => import('./pages/teacher/TeacherLogin'));
 const TeacherLayout = lazy(() => import('./pages/teacher/TeacherLayout'));
 const Students = lazy(() => import('./pages/teacher/Students'));
@@ -70,6 +71,7 @@ export default function App() {
         <Route path="/battle/:roomId" element={S(<BattleGame />)} />
         <Route path="/ranking" element={S(<Ranking />)} />
         <Route path="/me" element={S(<MyRecord />)} />
+        <Route path="/names" element={S(<NameGame />)} />
         <Route path="/teacher" element={<TeacherLogin />} />
         <Route
           path="/teacher"

@@ -45,6 +45,8 @@ export default function Home() {
   const level = levelOf(student.xp);
 
   const menu = [
+    // 선생님에게만 보이는 항목(자리연습 앞)
+    ...(student.teacher ? [{ to: '/names', title: '학생이름 외우기', desc: '사진 보고 이름 익히기', icon: '🧑‍🏫' }] : []),
     { to: '/position', title: '자리연습', desc: `${passed} / ${POSITION_TOTAL} 단계`, icon: '🎯' },
     { to: '/word', title: '낱말연습', desc: '교과서 낱말과 뜻', icon: '🔤' },
     { to: '/sentence', title: '단문연습', desc: student.bestKo ? `최고 ${student.bestKo}타` : '한 문장씩', icon: '✏️' },
@@ -103,12 +105,13 @@ export default function Home() {
       </Link>
 
       {/* 연습 메뉴 */}
-      <div className="grid grid-cols-5 gap-4">
+      {/* 선생님은 메뉴가 하나 더 있어 6열, 학생은 기존 5열 */}
+      <div className={`grid gap-4 ${student.teacher ? 'grid-cols-6' : 'grid-cols-5'}`}>
         {menu.map((m) => (
           <Link key={m.to} to={m.to} className="rounded-2xl bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <div className="text-3xl">{m.icon}</div>
-            <div className="mt-2 text-xl font-black">{m.title}</div>
-            <div className="mt-1 text-sm text-ink/60">{m.desc}</div>
+            <div className={`mt-2 font-black break-keep ${student.teacher ? 'text-lg' : 'text-xl'}`}>{m.title}</div>
+            <div className="mt-1 text-sm break-keep text-ink/60">{m.desc}</div>
           </Link>
         ))}
       </div>

@@ -16,6 +16,7 @@ const DOING: [string, string][] = [
   ['/battle', '배틀'],
   ['/ranking', '순위 보기'],
   ['/me', '내 기록'],
+  ['/names', '학생이름 외우기'],
   ['/home', '홈'],
 ];
 
@@ -71,7 +72,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </div>
         <div className="ml-auto flex items-center gap-3 text-sm">
           <span className="font-bold">
-            {student.classNo}반 {student.name}
+            {student.teacher ? '선생님' : `${student.classNo}반`} {student.name}
           </span>
           <TierBadge tier={tier} />
           <span className="rounded-full bg-mint-100 px-2.5 py-0.5 text-xs font-bold text-mint-700" title="자리연습 진행 단계(한글 8 + 기호 2)">

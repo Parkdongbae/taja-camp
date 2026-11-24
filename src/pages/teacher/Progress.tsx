@@ -2,6 +2,7 @@
 // 기본 export: Progress (선생님 모드 탭 /teacher/progress). 단계 조정은 학생 관리 탭에서 한다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { backend } from '../../data';
+import { isMemberId } from '../../engine/member';
 import { AppError, type SessionMode, type SessionRecord, type Student } from '../../data/types';
 import {
   STAGES,
@@ -127,7 +128,7 @@ export default function Progress() {
     setLoading(true);
     setErr('');
     try {
-      setStudents(await backend.listStudents());
+      setStudents((await backend.listStudents()).filter((s) => !isMemberId(s.id)));
     } catch (e) {
       setErr(errMsg(e));
       setStudents((s) => s ?? []);

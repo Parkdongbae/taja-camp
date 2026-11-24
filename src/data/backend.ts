@@ -11,6 +11,7 @@ import type {
   SessionRecord,
   Settings,
   Student,
+  TeacherApplicant,
 } from './types';
 
 export type Unsub = () => void;
@@ -28,6 +29,10 @@ export interface Backend {
   teacherLogin(email: string, password: string): Promise<void>;
   /** 교사 계정 만들기. 교사가 한 명도 없으면 첫 가입자가 관리자(owner)가 된다. 그 외에는 초대된 이메일만 가능 → 아니면 AppError('NOT_TEACHER'). */
   teacherSignup(email: string, password: string): Promise<void>;
+  /** 선생님 회원 가입 신청(성함 + PIN, 학번 없음). 관리자가 승인해야 입장할 수 있다. 같은 성함이 이미 있으면 AppError('NAME_TAKEN'). */
+  memberSignup(name: string, pin: string): Promise<void>;
+  /** 승인된 선생님 회원 입장(성함 + PIN). 승인 전이거나 틀리면 AppError('LOGIN_FAILED'). 입장 뒤에는 학생과 같은 AuthUser(role 'student', studentId = memberIdOf(name)). */
+  memberLogin(name: string, pin: string): Promise<void>;
   logout(): Promise<void>;
 
   // ── 학생 데이터 ──
@@ -49,6 +54,12 @@ export interface Backend {
   inviteTeacher(email: string): Promise<void>;
   removeTeacherInvite(email: string): Promise<void>;
   listRecentSessions(max: number): Promise<SessionRecord[]>;
+  /** 승인을 기다리는 선생님 회원 가입 신청 목록. */
+  listApplicants(): Promise<TeacherApplicant[]>;
+  /** 관리자만. 신청을 승인해 선생님 회원(students 문서, teacher: true)으로 만든다. */
+  approveApplicant(id: string): Promise<void>;
+  /** 신청을 지운다(거절). */
+  removeApplicant(id: string): Promise<void>;
 
   // ── 설정·콘텐츠 ──
   watchSettings(cb: (s: Settings) => void): Unsub;

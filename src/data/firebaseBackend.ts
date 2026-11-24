@@ -4,7 +4,8 @@
 // - firebase 모듈은 동적 import 로 불러오고, backend 객체는 즉시(동기) 쓸 수 있다.
 //   모든 메서드는 내부 준비 Promise(ready)를 기다린 뒤 실행된다.
 // - Firestore: students, secrets(읽기 불가), links/{uid}(익명 uid → 학번), probes/{uid}(PIN 설정 여부 확인용),
-//   teachers, config/owner, invites, sessions, settings/global, content/{meta|partN}
+//   teachers, config/owner, invites, sessions, settings/global, content/{meta|partN},
+//   applicants/{memberId}(선생님 회원 가입 신청. 승인되면 students/{memberId}(teacher: true) + secrets 로 옮긴다)
 // - Realtime Database: presence/{sid}, rooms/{roomId}
 // - 규칙 파일: 프로젝트 루트 firestore.rules, database.rules.json
 import type { FirebaseApp } from 'firebase/app';
@@ -28,7 +29,9 @@ import {
   type SessionRecord,
   type Settings,
   type Student,
+  type TeacherApplicant,
 } from './types';
+import { isMemberId, memberIdOf, normalizeMemberName } from '../engine/member';
 
 export interface FirebaseConfig {
   apiKey: string;
@@ -170,7 +173,21 @@ function toRoom(id: string, v: unknown): BattleRoom | null {
 
 function toStudent(id: string, data: Record<string, unknown>): Student {
   const base = newStudent(id, String(data.name ?? ''));
-  return { ...base, ...(data as Partial<Student>), id };
+  const s: Student = { ...base, ...(data as Partial<Student>), id };
+  delete s.teacher;
+  if (data.teacher === true) s.teacher = true; // 선생님 회원 표시는 true 일 때만
+  return s;
+}
+
+/** 선생님 회원 성함·PIN 형식 검사 */
+function checkMemberInput(nm: string, pin: string) {
+  if (!nm || nm.length > 20) throw new AppError('LOGIN_FAILED', '성함은 1~20자로 적어 주세요.');
+  if (!/^[0-9]{4}$/.test(pin)) throw new AppError('LOGIN_FAILED', 'PIN 숫자 4자리를 입력하세요.');
+}
+
+/** 선생님 회원 문서 기본값(학번 칸은 0) */
+function newMemberDoc(id: string, name: string): Student {
+  return { ...newStudent(id, name), grade: 0, classNo: 0, number: 0, teacher: true };
 }
 
 function random32(): number {
@@ -357,6 +374,22 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
     await fb.F.updateDoc(fb.F.doc(fb.fs, 'students', sid), { lastLoginAt: Date.now() }).catch(() => undefined);
   }
 
+  /** 익명 로그인 → links/{uid} 생성(규칙이 이름·PIN 해시 검증). 학생·선생님 회원 공용 */
+  function linkLogin(sid: string, nm: string, pin: string, failMsg: string): Promise<void> {
+    return flow(async (fb) => {
+      const user = await signInStudentAnon(fb);
+      const pinHash = await pinHashOf(sid, pin);
+      try {
+        await fb.F.setDoc(fb.F.doc(fb.fs, 'links', user.uid), { sid, name: nm, pinHash, at: Date.now() });
+      } catch (e) {
+        await dropCurrentUser(fb);
+        const ae = toAppError(e);
+        throw ae.code === 'PERMISSION' ? new AppError('LOGIN_FAILED', failMsg) : ae;
+      }
+      await afterStudentLogin(fb, sid);
+    });
+  }
+
   /** teachers/{uid} 가 없으면 owner 또는 초대 조건으로 등록을 시도한다. 성공하면 true. */
   async function ensureTeacherDoc(fb: Fb, user: User): Promise<boolean> {
     const { F, fs } = fb;
@@ -533,20 +566,34 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
     },
 
     studentLogin(id, name, pin) {
-      const sid = id.trim();
-      const nm = name.trim();
+      return linkLogin(id.trim(), name.trim(), pin, '학번·이름·PIN 을 확인해 주세요.');
+    },
+
+    memberSignup(name, pin) {
+      const nm = normalizeMemberName(name);
       return flow(async (fb) => {
-        const user = await signInStudentAnon(fb);
-        const pinHash = await pinHashOf(sid, pin);
+        checkMemberInput(nm, pin);
+        const { F, fs } = fb;
+        const tid = memberIdOf(nm);
+        await signInStudentAnon(fb);
         try {
-          await fb.F.setDoc(fb.F.doc(fb.fs, 'links', user.uid), { sid, name: nm, pinHash, at: Date.now() });
+          const pinHash = await pinHashOf(tid, pin);
+          // 문서가 이미 있으면 update 가 되어 거부, students/{tid} 가 있어도 규칙이 거부
+          await F.setDoc(F.doc(fs, 'applicants', tid), { id: tid, name: nm, pinHash, at: Date.now() });
         } catch (e) {
-          await dropCurrentUser(fb);
           const ae = toAppError(e);
-          throw ae.code === 'PERMISSION' ? new AppError('LOGIN_FAILED', '학번·이름·PIN 을 확인해 주세요.') : ae;
+          throw ae.code === 'PERMISSION'
+            ? new AppError('NAME_TAKEN', '같은 성함으로 이미 가입 신청했거나 등록되어 있습니다.')
+            : ae;
+        } finally {
+          await dropCurrentUser(fb); // 신청만 하고 로그인 상태는 남기지 않는다
         }
-        await afterStudentLogin(fb, sid);
       });
+    },
+
+    memberLogin(name, pin) {
+      const nm = normalizeMemberName(name);
+      return linkLogin(memberIdOf(nm), nm, pin, '관리자 승인 전이거나 성함·PIN 이 다릅니다.');
     },
 
     studentFirstLogin(id, name, pin) {
@@ -640,7 +687,7 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
     updateStudent(id, patch) {
       return run(async (fb) => {
         const p = clean({ ...patch }) as Record<string, unknown>;
-        for (const k of ['id', 'name', 'grade', 'classNo', 'number', 'createdAt']) delete p[k];
+        for (const k of ['id', 'name', 'grade', 'classNo', 'number', 'createdAt', 'teacher']) delete p[k];
         if (!Object.keys(p).length) return;
         await fb.F.updateDoc(fb.F.doc(fb.fs, 'students', id), p);
       });
@@ -775,6 +822,67 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
         const { F, fs } = fb;
         const snap = await F.getDocs(F.query(F.collection(fs, 'sessions'), F.orderBy('createdAt', 'desc'), F.limit(max)));
         return snap.docs.map((d) => ({ ...(d.data() as SessionRecord), id: d.id }));
+      });
+    },
+
+    // ── 선생님 회원 가입 신청 ──
+    listApplicants() {
+      return run(async (fb) => {
+        requireTeacher();
+        const snap = await fb.F.getDocs(fb.F.collection(fb.fs, 'applicants'));
+        // pinHash 는 화면에 넘기지 않는다
+        return snap.docs
+          .map((d): TeacherApplicant => ({ id: d.id, name: String(d.data().name ?? ''), at: Number(d.data().at) || 0 }))
+          .sort((a, b) => a.at - b.at);
+      });
+    },
+
+    removeApplicant(id) {
+      return run(async (fb) => {
+        requireTeacher();
+        await fb.F.deleteDoc(fb.F.doc(fb.fs, 'applicants', id));
+      });
+    },
+
+    approveApplicant(id) {
+      return run(async (fb) => {
+        const me = requireTeacher();
+        if (!me.isOwner) throw new AppError('PERMISSION', '관리자만 승인할 수 있습니다.');
+        if (!isMemberId(id)) throw new AppError('UNKNOWN', '선생님 회원 신청이 아닙니다.');
+        const { F, fs } = fb;
+        const aRef = F.doc(fs, 'applicants', id);
+        const sRef = F.doc(fs, 'students', id);
+        const secRef = F.doc(fs, 'secrets', id);
+        const [aSnap, sSnap] = await Promise.all([F.getDoc(aRef), F.getDoc(sRef)]);
+        if (!aSnap.exists()) {
+          if (sSnap.exists() && sSnap.data().teacher === true) return; // 이미 승인됨(멱등)
+          throw new AppError('UNKNOWN', '가입 신청이 없습니다.');
+        }
+        const a = aSnap.data();
+        const nm = normalizeMemberName(String(a.name ?? ''));
+        const pinHash = String(a.pinHash ?? '');
+        // 규칙은 id 와 성함의 대응을 검사하지 못하므로 여기서 확인(어긋나면 로그인할 수 없음)
+        if (memberIdOf(nm) !== id || pinHash.length !== 64) {
+          throw new AppError('UNKNOWN', '신청 내용이 올바르지 않습니다. 거절하고 다시 신청하게 해 주세요.');
+        }
+        // students 생성 + secrets + 신청 삭제를 한 배치로(secrets 규칙은 getAfter 로 이름을 확인).
+        // 따로 쓰면 그 사이에 성함을 아는 사람이 studentFirstLogin 으로 PIN 을 먼저 정할 수 있다.
+        const commit = () => {
+          const b = F.writeBatch(fs);
+          if (!sSnap.exists()) b.set(sRef, clean(newMemberDoc(id, nm)));
+          else if (sSnap.data().teacher !== true || sSnap.data().name !== nm) b.update(sRef, { teacher: true, name: nm });
+          b.set(secRef, { pinHash, name: nm });
+          b.delete(aRef);
+          return b.commit();
+        };
+        try {
+          await commit();
+        } catch (e) {
+          // 이미 secrets 가 있으면(이전 시도 등) set 이 update 로 거부된다 → 지우고 한 번 더
+          if (toAppError(e).code !== 'PERMISSION' || !sSnap.exists()) throw e;
+          await F.deleteDoc(secRef);
+          await commit();
+        }
       });
     },
 

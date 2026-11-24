@@ -1,6 +1,7 @@
 // 학습 현황: 접속 중인 학생, 반 요약(평균 타수·단계 분포·배틀 개방·오늘 목표), 오늘 미연습 학생, 최근 연습 30건.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { backend } from '../../data';
+import { isMemberId } from '../../engine/member';
 import { AppError, type Presence, type SessionMode, type SessionRecord, type Student } from '../../data/types';
 import { isBattleUnlocked, todayString } from '../../engine';
 import { useAuth } from '../../state/auth';
@@ -36,7 +37,8 @@ export default function Status() {
     setLoading(true);
     setErr('');
     try {
-      const [st, rc] = await Promise.all([backend.listStudents(), backend.listRecentSessions(30)]);
+      const [st0, rc] = await Promise.all([backend.listStudents(), backend.listRecentSessions(30)]);
+      const st = st0.filter((s) => !isMemberId(s.id));
       setStudents(st);
       setRecent(rc);
     } catch (e) {
@@ -75,7 +77,7 @@ export default function Status() {
   }, [scope, goalMin, today]);
 
   const absent = scope.filter((s) => s.lastDay !== today).sort((a, b) => a.id.localeCompare(b.id));
-  const onlineShown = online.filter((p) => cls === 'all' || p.classNo === cls);
+  const onlineShown = online.filter((p) => !isMemberId(p.studentId) && (cls === 'all' || p.classNo === cls));
 
   if (!students || !recent) return <Spinner />;
 

@@ -14,3 +14,4 @@ serviceAccount*.json
 .setup-state.json
 .firebaserc
 firebase-debug.log
+학생사진/

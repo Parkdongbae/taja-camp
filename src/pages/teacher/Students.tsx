@@ -1,7 +1,9 @@
 // 학생 관리: 목록·검색, 추가/일괄 등록/CSV 내보내기, PIN 초기화·단계 조정·삭제, (관리자) 교사 초대.
+// 선생님 회원(성함+PIN 가입)은 학생 표·인원·CSV 에서 빼고, 별도 카드에서 가입 신청 승인·체크 해제·PIN 초기화·삭제를 한다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { backend } from '../../data';
-import { AppError, type Student } from '../../data/types';
+import { AppError, type Student, type TeacherApplicant } from '../../data/types';
+import { isMemberId } from '../../engine/member';
 import { tierName, tierOf } from '../../engine/scoring';
 import { useAuth } from '../../state/auth';
 import { Btn, Card, Modal, Spinner } from '../../components/ui';
@@ -103,7 +105,8 @@ const inputCls = 'w-full rounded-xl border border-mint-200 bg-white px-3 py-2 ou
 export default function Students() {
   const user = useAuth((s) => s.user);
   const isOwner = user?.role === 'teacher' && user.isOwner;
-  const [list, setList] = useState<Student[] | null>(null);
+  const [all, setAll] = useState<Student[] | null>(null);
+  const [applicants, setApplicants] = useState<TeacherApplicant[]>([]);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   const [cls, setCls] = useState<'all' | number>('all');
@@ -112,16 +115,24 @@ export default function Students() {
 
   const load = useCallback(async () => {
     try {
-      setList(await backend.listStudents());
+      setAll(await backend.listStudents());
       setErr('');
     } catch (e) {
       setErr(errMsg(e, '학생 목록을 불러오지 못했습니다.'));
-      setList((l) => l ?? []);
+      setAll((l) => l ?? []);
+    }
+    try {
+      setApplicants(await backend.listApplicants());
+    } catch (e) {
+      setErr((p) => p || errMsg(e, '가입 신청 목록을 불러오지 못했습니다.'));
     }
   }, []);
   useEffect(() => {
     void load();
   }, [load]);
+
+  const list = useMemo(() => (all ? all.filter((s) => !isMemberId(s.id)) : null), [all]);
+  const members = useMemo(() => (all ?? []).filter((s) => isMemberId(s.id)).sort((a, b) => a.name.localeCompare(b.name)), [all]);
 
   const classes = useMemo(() => [...new Set((list ?? []).map((s) => s.classNo))].sort((a, b) => a - b), [list]);
   const shown = useMemo(() => {
@@ -249,6 +260,17 @@ export default function Students() {
           </tbody>
         </table>
       </Card>
+
+      <TeacherMembers
+        members={members}
+        applicants={applicants}
+        isOwner={!!isOwner}
+        onDlg={setDlg}
+        onChanged={(m) => {
+          if (m) setMsg(m);
+          void load();
+        }}
+      />
 
       {isOwner && <Invites />}
 
@@ -515,6 +537,137 @@ function StageDialog({ s, onClose, onDone }: DlgProps & { s: Student }) {
         </Btn>
       </div>
     </Modal>
+  );
+}
+
+function TeacherMembers({
+  members,
+  applicants,
+  isOwner,
+  onDlg,
+  onChanged,
+}: {
+  members: Student[];
+  applicants: TeacherApplicant[];
+  isOwner: boolean;
+  onDlg: (d: Dlg) => void;
+  onChanged: (msg?: string) => void;
+}) {
+  const [err, setErr] = useState('');
+  const [busyId, setBusyId] = useState('');
+  const run = async (id: string, fn: () => Promise<void>, ok: string, fail: string) => {
+    setBusyId(id);
+    setErr('');
+    try {
+      await fn();
+      onChanged(ok);
+    } catch (e) {
+      setErr(errMsg(e, fail));
+    } finally {
+      setBusyId('');
+    }
+  };
+  const reject = (a: TeacherApplicant) => {
+    if (!window.confirm(`${a.name} 선생님의 가입 신청을 거절(삭제)할까요?`)) return;
+    void run(a.id, () => backend.removeApplicant(a.id), `${a.name} 선생님의 가입 신청을 거절했습니다.`, '거절하지 못했습니다. 잠시 후 다시 시도하세요.');
+  };
+  const total = members.length + applicants.length;
+  const box = 'h-4 w-4 accent-mint-500 disabled:cursor-not-allowed';
+  return (
+    <Card className="overflow-x-auto p-0">
+      <div className="px-4 pt-4">
+        <h2 className="font-bold">선생님 회원</h2>
+        <p className="mt-1 text-sm text-ink/60">
+          선생님은 첫 화면의 [선생님] 탭에서 성함과 PIN 으로 가입 신청합니다. 여기서 &apos;선생님&apos;에 체크하면 그 회원의 홈에 &apos;학생이름 외우기&apos;가 보입니다. 관리자 권한은 주어지지 않습니다.
+        </p>
+        {!isOwner && <p className="mt-1 text-sm text-ink/60">관리자만 바꿀 수 있습니다.</p>}
+        {err && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-miss">{err}</p>}
+      </div>
+      <table className="mt-3 w-full text-sm">
+        <thead>
+          <tr className="border-y border-mint-200 bg-mint-50 text-left text-ink/70">
+            <th className="px-3 py-2">선생님</th>
+            <th>성함</th>
+            <th>상태</th>
+            <th>최근 접속</th>
+            <th className="pr-3">동작</th>
+          </tr>
+        </thead>
+        <tbody>
+          {total === 0 && (
+            <tr>
+              <td colSpan={5} className="p-6 text-center text-ink/60">
+                아직 가입 신청이 없습니다.
+              </td>
+            </tr>
+          )}
+          {applicants.map((a) => (
+            <tr key={`a${a.id}`} className="border-b border-mint-100 bg-gold/10 last:border-0">
+              <td className="px-3 py-2">
+                <input
+                  type="checkbox"
+                  className={box}
+                  checked={false}
+                  disabled={!isOwner || busyId === a.id}
+                  title={isOwner ? '체크하면 승인합니다' : '관리자만 바꿀 수 있습니다'}
+                  aria-label={`${a.name} 승인`}
+                  onChange={() => void run(a.id, () => backend.approveApplicant(a.id), `${a.name} 선생님을 승인했습니다.`, '승인하지 못했습니다. 잠시 후 다시 시도하세요.')}
+                />
+              </td>
+              <td className="font-bold">{a.name}</td>
+              <td>
+                <span className="rounded-full bg-gold/30 px-2 py-0.5 text-xs font-bold">승인 대기</span>
+                <span className="ml-2 text-xs text-ink/50">신청 {fmtDate(a.at)}</span>
+              </td>
+              <td className="text-ink/40">-</td>
+              <td className="pr-3">
+                <Btn small variant="danger" onClick={() => reject(a)} disabled={busyId === a.id}>
+                  거절
+                </Btn>
+              </td>
+            </tr>
+          ))}
+          {members.map((s) => {
+            const on = s.teacher !== false;
+            return (
+              <tr key={s.id} className="border-b border-mint-100 last:border-0 hover:bg-mint-50/60">
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    className={box}
+                    checked={on}
+                    disabled={!isOwner || busyId === s.id}
+                    title={isOwner ? '' : '관리자만 바꿀 수 있습니다'}
+                    aria-label={`${s.name} 선생님 권한`}
+                    onChange={(e) =>
+                      void run(
+                        s.id,
+                        () => backend.teacherUpdateStudent(s.id, { teacher: e.target.checked }),
+                        e.target.checked ? `${s.name} 선생님을 다시 선생님으로 체크했습니다.` : `${s.name} 선생님의 체크를 껐습니다.`,
+                        '바꾸지 못했습니다. 잠시 후 다시 시도하세요.',
+                      )
+                    }
+                  />
+                </td>
+                <td className="font-bold">{s.name}</td>
+                <td className={on ? 'text-mint-700' : 'text-ink/60'}>{on ? '선생님 회원' : '선생님 아님 — 이름 외우기 메뉴 숨김'}</td>
+                <td className="tabular-nums">{fmtDate(s.lastLoginAt)}</td>
+                <td className="whitespace-nowrap pr-3">
+                  <div className="flex gap-1">
+                    <Btn small variant="ghost" onClick={() => onDlg({ kind: 'pin', s })}>
+                      PIN 초기화
+                    </Btn>
+                    <Btn small variant="danger" onClick={() => onDlg({ kind: 'del', s })}>
+                      삭제
+                    </Btn>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 

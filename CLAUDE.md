@@ -18,6 +18,8 @@
 | `src/state/` | zustand 스토어(`useAuth`, `useSettings`, `usePrefs`) |
 | `src/components/` | 공용 UI (가상 키보드, 손 실루엣, 모달 등) |
 | `src/pages/` | 화면 |
+| `src/roster/` | 사진명렬표(나이스 엑셀) 읽기·브라우저 저장(IndexedDB)·이름 외우기 로직. **서버로 보내지 않는다(backend·fetch 호출 금지)** |
+| `학생사진/` | 시험용 실제 명렬표. **git 에 올리지 않음** |
 | `content-data/` | 교과서 추출 콘텐츠 JSON. **git 에 올리지 않음**. 교사가 선생님 모드에서 업로드 |
 | `교과서자료/` | 원본. **git 에 올리지 않음. README 등 공개 파일에 교과서·출판사 이름을 적지 말 것** |
 
@@ -41,6 +43,8 @@
 - 계급: 훈련병 0 / 이등병 100 / 일병 300 / 상병 600 / 병장 1000 / 예비역 1500 RP. 강등 없음.
 - 콘텐츠 선택: 교사가 수업 설정에서 과목·단원을 여러 개 고르면(`settings.contentPick`, `content/pick.ts`) 낱말·단문·장문 연습, 퀴즈, 배틀에 그것만 나온다. 비어 있으면 전체(기본). `useContent` 의 `words/sentences/passages` 는 거른 것, `all*` 은 전체(선생님 화면·수행평가용).
 - 키보드 종류(`KeyboardKind`: desktop / laptop / surface(서피스 고3 타입 커버))를 사용자가 고를 수 있다. 가상 키보드 그림만 달라지고 판정은 같다.
+- 선생님 회원: 첫 화면 [선생님] 탭에서 성함 + PIN 으로 가입 신청(`applicants/{id}`, id = `engine/member.ts` 의 `memberIdOf(성함)`). 관리자가 학생 관리에서 '선생님'에 체크하면 `students/{id}` 문서(`teacher: true`, 학년·반·번호 0)가 된다. 관리자 권한은 없고, 홈에 '학생이름 외우기'(`/names`)만 더 보인다. 학생 목록·순위에서는 `isMemberId` 로 뺀다. **`firestore.rules` 에 applicants·teacher 칸이 추가돼 규칙 배포가 필요하다.**
+- 학생이름 외우기: 나이스 사진명렬표(.xlsx)를 브라우저에서 읽어(`roster/parse.ts`, 사진 앵커 바로 아래 칸이 이름, 학년 전체 파일은 번호가 되돌아가면 다음 반) 사진 카드가 위에서 아래로 떨어지고 이름을 쳐서 맞춘다. 기록을 서버에 남기지 않는다.
 - UI 문구는 모두 한국어. 마우스 없이 Enter/Esc 로 진행 가능해야 한다. 소리는 기본 꺼짐.
 - 붙여넣기 차단, `autocomplete/spellcheck/autocapitalize off`.
 
@@ -50,7 +54,7 @@
 - 새 패키지를 추가하지 않는다.
 
 ## 이미 만들어진 공용 코드 (새로 만들지 말고 쓸 것)
-- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 527건 통과 상태를 유지할 것.
+- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 558건 통과 상태를 유지할 것.
 - `src/data/index.ts` 의 `backend`, `src/state/auth.ts` 의 `useAuth()`({ready,user,student,settings}), `src/state/prefs.ts` 의 `usePrefs()`, `src/content/index.ts`(useContent, pickWords 등).
 - `src/state/record.ts`: 연습이 끝나면 반드시 `finishSession(rec, extra?)` 로 저장(배틀은 `finishBattle`). 학생 문서를 화면에서 직접 고치지 않는다(자리 연습 단계 완료 표시 `stageDrill` 만 예외로 `backend.updateStudent`).
 - `src/components/ui.tsx`(Modal, Btn, Card, Stat, Spinner, Kbd), `TierBadge.tsx`, `AppShell.tsx`(상단 바는 이미 있으므로 화면은 본문만 그린다. 본문 영역 높이는 `h-full`).

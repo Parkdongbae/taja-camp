@@ -4,6 +4,7 @@
 // - 인증 상태는 sessionStorage(탭마다 다른 학생으로 로그인 가능).
 // - 저장소가 비어 있으면 학생 6명(1101~1106)을 만든다. PIN 은 첫 접속에서 정한다.
 // - 교사: 아무 이메일 + 6자 이상 비밀번호로 가입·로그인(첫 가입자가 관리자). 초대 목록은 저장만 한다.
+// - 선생님 회원: 성함 + PIN 으로 신청(applicants) → 관리자 승인 시 students(teacher: true) + secrets 로 옮긴다.
 // - 방 변경·낱말 선점은 Web Locks API(navigator.locks)가 있으면 탭 간 잠금으로 원자성을 확보한다.
 // - 탭을 닫으면(pagehide) 접속 현황에서 빠지고, 대기방에서는 나가며, 경기 중이면 online=false.
 import type { Backend, Unsub } from './backend';
@@ -21,12 +22,15 @@ import {
   type SessionRecord,
   type Settings,
   type Student,
+  type TeacherApplicant,
 } from './types';
+import { isMemberId, memberIdOf, normalizeMemberName } from '../engine/member';
 
 const P = 'taja.demo.';
 const K = {
   students: P + 'students',
   secrets: P + 'secrets',
+  applicants: P + 'applicants',
   sessions: P + 'sessions',
   teachers: P + 'teachers',
   invites: P + 'invites',
@@ -54,6 +58,9 @@ interface TeacherRec {
   uid: string;
   pwHash: string;
   owner: boolean;
+}
+interface ApplicantRec extends TeacherApplicant {
+  pinHash: string;
 }
 interface PresenceRec {
   p: Presence;
@@ -419,6 +426,34 @@ export function createLocalBackend(): Backend {
       setAuth({ role: 'teacher', uid: rec.uid, email: key, isOwner: rec.owner });
     },
 
+    async memberSignup(name, pin) {
+      const nm = normalizeMemberName(name);
+      if (!nm || nm.length > 20) throw new AppError('LOGIN_FAILED', '성함은 1~20자로 적어 주세요.');
+      if (!/^[0-9]{4}$/.test(pin)) throw new AppError('LOGIN_FAILED', 'PIN 숫자 4자리를 입력하세요.');
+      const tid = memberIdOf(nm);
+      const pinHash = await sha256Hex(`taja:${tid}:${pin}`);
+      await withLock('taja-demo-applicants', () => {
+        const apps = read<Record<string, ApplicantRec>>(K.applicants, {});
+        if (apps[tid] || students()[tid]) {
+          throw new AppError('NAME_TAKEN', '같은 성함으로 이미 가입 신청했거나 등록되어 있습니다.');
+        }
+        apps[tid] = { id: tid, name: nm, pinHash, at: Date.now() };
+        write(K.applicants, apps);
+      });
+    },
+
+    async memberLogin(name, pin) {
+      const nm = normalizeMemberName(name);
+      try {
+        await backend.studentLogin(memberIdOf(nm), nm, pin);
+      } catch (e) {
+        if (e instanceof AppError && e.code === 'LOGIN_FAILED') {
+          throw new AppError('LOGIN_FAILED', '관리자 승인 전이거나 성함·PIN 이 다릅니다.');
+        }
+        throw e;
+      }
+    },
+
     async logout() {
       backend.setPresence(null);
       if (myRooms.size) {
@@ -439,7 +474,7 @@ export function createLocalBackend(): Backend {
       const u = me();
       if (!u || (u.role === 'student' && u.studentId !== id)) throw new AppError('PERMISSION', '권한이 없습니다.');
       const p = clone(patch) as Partial<Student>;
-      for (const k of ['id', 'name', 'grade', 'classNo', 'number', 'createdAt'] as const) delete p[k];
+      for (const k of ['id', 'name', 'grade', 'classNo', 'number', 'createdAt', 'teacher'] as const) delete p[k];
       const all = students();
       if (!all[id]) throw new AppError('PERMISSION', '학생이 없습니다.');
       all[id] = { ...all[id], ...p };
@@ -512,11 +547,15 @@ export function createLocalBackend(): Backend {
     },
 
     async teacherUpdateStudent(id, patch) {
-      requireTeacher();
+      const u = requireTeacher();
       const all = students();
       if (!all[id]) throw new AppError('PERMISSION', '학생이 없습니다.');
       const p = clone(patch) as Partial<Student>;
       delete p.id;
+      // 선생님 회원 표시는 관리자만 바꾼다(규칙과 같게)
+      if ('teacher' in p && !!p.teacher !== !!all[id].teacher && !u.isOwner) {
+        throw new AppError('PERMISSION', '관리자만 선생님 회원을 지정할 수 있습니다.');
+      }
       all[id] = { ...all[id], ...p };
       write(K.students, all);
     },
@@ -553,6 +592,46 @@ export function createLocalBackend(): Backend {
       return read<SessionRecord[]>(K.sessions, [])
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, max);
+    },
+
+    // ── 선생님 회원 가입 신청 ──
+    async listApplicants() {
+      requireTeacher();
+      return Object.values(read<Record<string, ApplicantRec>>(K.applicants, {}))
+        .map(({ id, name, at }) => ({ id, name, at }))
+        .sort((a, b) => a.at - b.at);
+    },
+
+    async approveApplicant(id) {
+      requireOwner();
+      if (!isMemberId(id)) throw new AppError('UNKNOWN', '선생님 회원 신청이 아닙니다.');
+      await withLock('taja-demo-applicants', () => {
+        const apps = read<Record<string, ApplicantRec>>(K.applicants, {});
+        const a = apps[id];
+        const all = students();
+        if (!a) {
+          if (all[id]?.teacher) return; // 이미 승인됨
+          throw new AppError('UNKNOWN', '가입 신청이 없습니다.');
+        }
+        all[id] = all[id]
+          ? { ...all[id], name: a.name, teacher: true }
+          : { ...newStudent(id, a.name), grade: 0, classNo: 0, number: 0, teacher: true };
+        write(K.students, all);
+        const secrets = read<Record<string, string>>(K.secrets, {});
+        secrets[id] = a.pinHash;
+        write(K.secrets, secrets);
+        delete apps[id];
+        write(K.applicants, apps);
+      });
+    },
+
+    async removeApplicant(id) {
+      requireTeacher();
+      await withLock('taja-demo-applicants', () => {
+        const apps = read<Record<string, ApplicantRec>>(K.applicants, {});
+        delete apps[id];
+        write(K.applicants, apps);
+      });
     },
 
     // ── 설정·콘텐츠 ──

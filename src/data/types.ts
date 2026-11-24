@@ -85,6 +85,8 @@ export interface Student {
   solo?: { level: number; wins: number; games: number };
   /** 수행평가 결과(언어별 최고 기록). 응시 전에는 없음 */
   exam?: Partial<Record<Lang, ExamResult>>;
+  /** 선생님 회원(관리자가 학생 관리에서 체크). 홈에 '학생이름 외우기'가 보인다. 관리자 권한은 아니다 */
+  teacher?: boolean;
   createdAt: number;
   lastLoginAt: number;
 }
@@ -199,6 +201,7 @@ export type AppErrorCode =
   | 'PIN_ALREADY_SET'
   | 'NOT_REGISTERED' // 명단에 없음(구분 가능한 경우에만)
   | 'NOT_TEACHER'
+  | 'NAME_TAKEN' // 같은 성함으로 이미 가입 신청·등록됨
   | 'ROOM_FULL'
   | 'ROOM_GONE'
   | 'PERMISSION'
@@ -210,6 +213,13 @@ export class AppError extends Error {
     super(message ?? code);
     this.code = code;
   }
+}
+
+/** 선생님 회원 가입 신청(관리자 승인 전). id 는 engine/member 의 memberIdOf(name) */
+export interface TeacherApplicant {
+  id: string;
+  name: string;
+  at: number;
 }
 
 // ───────── 접속 현황·배틀 ─────────

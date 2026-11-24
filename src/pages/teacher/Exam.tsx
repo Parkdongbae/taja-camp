@@ -2,6 +2,7 @@
 // 설정은 backend.watchSettings 로 읽고 바꾸면 바로 updateSettings({ exam }) 로 저장한다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { backend } from '../../data';
+import { isMemberId } from '../../engine/member';
 import { AppError, DEFAULT_EXAM, SUBJECT_LABEL, type ExamConfig, type ExamGrade, type Lang, type Student } from '../../data/types';
 import { examTable, normalizeText } from '../../engine';
 import { useContent } from '../../content';
@@ -95,7 +96,7 @@ export default function TeacherExam() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setStudents(await backend.listStudents());
+      setStudents((await backend.listStudents()).filter((s) => !isMemberId(s.id)));
     } catch (e) {
       setMsg(e instanceof AppError && e.code === 'PERMISSION' ? '권한이 없습니다.' : '학생 정보를 불러오지 못했습니다.');
       setStudents((s) => s ?? []);

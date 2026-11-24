@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { backend } from '../data';
 import { AppError, type Student } from '../data/types';
 import { TIERS, tierOf } from '../engine/scoring';
+import { isMemberId } from '../engine/member';
 import { useAuth } from '../state/auth';
 import { Btn, Card, Spinner } from '../components/ui';
 import { TierBadge } from '../components/TierBadge';
@@ -73,7 +74,7 @@ export default function Ranking() {
     setLoading(true);
     setErr('');
     try {
-      setList(await backend.listStudents());
+      setList((await backend.listStudents()).filter((s) => !isMemberId(s.id)));
     } catch (e) {
       setErr(errMsg(e));
     } finally {

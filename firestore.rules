@@ -4,6 +4,9 @@ rules_version = '2';
 // - 학생: 익명 로그인 후 links/{uid} 를 만들어 학번과 연결한다. 링크 생성 시 이름·PIN 해시를 검증한다.
 // - 교사: 이메일 로그인 + teachers/{uid}. 첫 가입자는 config/owner 와 함께 관리자(owner)가 된다.
 //   그 뒤로는 invites/{이메일} 이 있는 사용자만 자기 teachers 문서를 만들 수 있다.
+// - 선생님 회원: 성함 + PIN 으로 applicants/{t+16진수9자} 에 신청 → 관리자(owner)가 승인하면
+//   students/{같은 id}(teacher: true) + secrets 를 한 배치로 만든다. 승인 전에는 students 문서가 없어 links 를 못 만든다.
+//   teacher 표시는 owner 만 바꿀 수 있다(본인·일반 교사 불가).
 // - 알려진 한계: PIN 무차별 대입을 막을 서버 측 횟수 제한이 없다(익명 계정을 새로 만들어 반복 시도 가능).
 
 service cloud.firestore {
@@ -25,12 +28,17 @@ service cloud.firestore {
     function nameMatches(sid, name) {
       return exists(studentPath(sid)) && get(studentPath(sid)).data.name == name;
     }
+    // 같은 배치에서 만든 학생 문서까지 본다(배치가 아니면 nameMatches 와 같다). secrets 생성 전용
+    function nameMatchesAfter(sid, name) {
+      return existsAfter(studentPath(sid)) && getAfter(studentPath(sid)).data.name == name;
+    }
+    function memberIdOk(id) { return id.matches('^t[0-9a-f]{9}$'); }
 
     // ── 학생 ──
     function studentKeys() {
       return ['id', 'name', 'grade', 'classNo', 'number', 'position', 'stageBest', 'stageDrill',
               'rp', 'wins', 'games', 'bestKo', 'bestEn', 'xp', 'quizPoints', 'totalSeconds', 'days', 'streak',
-              'lastDay', 'todaySeconds', 'weakKeys', 'badges', 'exam', 'solo', 'createdAt', 'lastLoginAt'];
+              'lastDay', 'todaySeconds', 'weakKeys', 'badges', 'exam', 'solo', 'teacher', 'createdAt', 'lastLoginAt'];
     }
     function trackOk(pa, pb, t, max) {
       return pb[t] is number && pb[t] >= pa[t] && pb[t] <= pa[t] + 1 && pb[t] <= max;
@@ -39,7 +47,7 @@ service cloud.firestore {
       let a = resource.data;
       let b = request.resource.data;
       return b.keys().hasOnly(studentKeys())
-        && !b.diff(a).affectedKeys().hasAny(['id', 'name', 'grade', 'classNo', 'number', 'createdAt'])
+        && !b.diff(a).affectedKeys().hasAny(['id', 'name', 'grade', 'classNo', 'number', 'teacher', 'createdAt'])
         && b.rp is number && b.rp >= a.rp && b.rp <= a.rp + 80
         && b.position is map && b.position.keys().hasOnly(['ko', 'symbol', 'en'])
         && trackOk(a.position, b.position, 'ko', 8)
@@ -52,25 +60,49 @@ service cloud.firestore {
     match /students/{sid} {
       // 순위표를 위해 링크가 있는 학생은 전체 목록을 읽을 수 있다
       allow read: if isMember();
-      allow create: if isTeacher()
-        && sid.matches('^[0-9]{4}$')
-        && request.resource.data.id == sid
+      // 학생(4자리 학번, 교사 누구나) 또는 선생님 회원(관리자만)
+      allow create: if request.resource.data.id == sid
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 20;
+        && request.resource.data.name.size() <= 20
+        && (
+          (isTeacher() && sid.matches('^[0-9]{4}$') && request.resource.data.get('teacher', false) == false)
+          || (isOwner() && memberIdOk(sid) && request.resource.data.get('teacher', false) is bool)
+        );
       allow delete: if isTeacher();
-      allow update: if isTeacher() || (isStudent(sid) && selfUpdateOk());
+      // teacher 표시를 바꾸는 변경은 관리자만
+      allow update: if (isTeacher()
+          && (isOwner() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['teacher'])))
+        || (isStudent(sid) && selfUpdateOk());
+    }
+
+    // ── 선생님 회원 가입 신청(승인 전). 이미 있으면 update 가 되어 거부 → 같은 성함 중복 신청 불가 ──
+    match /applicants/{id} {
+      allow read, delete: if isTeacher();
+      allow update: if false;
+      allow create: if signedIn()
+        && memberIdOk(id)
+        && request.resource.data.keys().hasOnly(['id', 'name', 'pinHash', 'at'])
+        && request.resource.data.id == id
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 20
+        && request.resource.data.pinHash is string
+        && request.resource.data.pinHash.size() == 64
+        && request.resource.data.at is number
+        && !exists(studentPath(id));
     }
 
     // ── PIN 해시: 아무도 읽을 수 없다 ──
     // create 요청에 name 을 함께 받아 명단의 이름과 일치하는지 검사한다(저장되는 name 은 무해).
+    // 선생님 회원 승인은 students 생성과 같은 배치이므로 getAfter 로 본다.
     match /secrets/{sid} {
       allow read, update: if false;
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['pinHash', 'name'])
         && request.resource.data.pinHash is string
         && request.resource.data.pinHash.size() == 64
-        && nameMatches(sid, request.resource.data.name);
+        && nameMatchesAfter(sid, request.resource.data.name);
       allow delete: if isTeacher(); // PIN 초기화
     }
 
