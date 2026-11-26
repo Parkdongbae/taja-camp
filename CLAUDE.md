@@ -46,6 +46,7 @@
 - 키보드 종류(`KeyboardKind`: desktop / laptop / surface(서피스 고3 타입 커버))를 사용자가 고를 수 있다. 가상 키보드 그림만 달라지고 판정은 같다.
 - 선생님 회원: 첫 화면 [선생님] 탭에서 성함 + PIN 으로 가입 신청(`applicants/{id}`, id = `engine/member.ts` 의 `memberIdOf(성함)`). 관리자가 학생 관리에서 '선생님'에 체크하면 `students/{id}` 문서(`teacher: true`, 학년·반·번호 0)가 된다. 관리자 권한은 없고, 홈에 '학생이름 외우기'(`/names`)만 더 보인다. 학생 목록·순위에서는 `isMemberId` 로 뺀다. **`firestore.rules` 에 applicants·teacher 칸이 추가돼 규칙 배포가 필요하다.**
 - 학생이름 외우기: 나이스 사진명렬표(.xlsx)를 브라우저에서 읽어(`roster/parse.ts`, 사진 앵커 바로 아래 칸이 이름, 학년 전체 파일은 번호가 되돌아가면 다음 반) 사진 카드가 위에서 아래로 떨어지고 이름을 쳐서 맞춘다. 기록을 서버에 남기지 않는다.
+- 콘텐츠 올리기(선생님 모드 콘텐츠 탭): 제미나이·챗GPT 에 PDF·HWPX 와 함께 줄 프롬프트(`content/upload.ts` 의 `aiPrompt`)를 복사 → AI 답을 붙여 넣거나 JSON 파일 선택 → 검증(`typeableText` 로 굽은 따옴표 등 정리) → 기본 '더하기'(`mergeBundles`: 같은 과목·단원만 바꿔 넣음) 또는 '전부 바꾸기'. 단원별 지우기(`removeUnit`). 브라우저에서 PDF·HWPX 를 직접 읽지는 않는다.
 - UI 문구는 모두 한국어. 마우스 없이 Enter/Esc 로 진행 가능해야 한다. 소리는 기본 꺼짐.
 - 붙여넣기 차단, `autocomplete/spellcheck/autocapitalize off`.
 
@@ -55,7 +56,7 @@
 - 새 패키지를 추가하지 않는다.
 
 ## 이미 만들어진 공용 코드 (새로 만들지 말고 쓸 것)
-- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 569건 통과 상태를 유지할 것.
+- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 574건 통과 상태를 유지할 것.
 - `src/data/index.ts` 의 `backend`, `src/state/auth.ts` 의 `useAuth()`({ready,user,student,settings}), `src/state/prefs.ts` 의 `usePrefs()`, `src/content/index.ts`(useContent, pickWords 등).
 - `src/state/record.ts`: 연습이 끝나면 반드시 `finishSession(rec, extra?)` 로 저장(배틀은 `finishBattle`). 학생 문서를 화면에서 직접 고치지 않는다(자리 연습 단계 완료 표시 `stageDrill` 만 예외로 `backend.updateStudent`).
 - `src/components/ui.tsx`(Modal, Btn, Card, Stat, Spinner, Kbd), `TierBadge.tsx`, `AppShell.tsx`(상단 바는 이미 있으므로 화면은 본문만 그린다. 본문 영역 높이는 `h-full`).
