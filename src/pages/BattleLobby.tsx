@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { backend } from '../data';
+import { RealtimeDownNotice, useRealtimeStatus } from '../components/battle/useRealtime';
 import { AppError, BATTLE_DURATION_SEC, BATTLE_MAX_PLAYERS, type BattleRoom, type ClassBattleRecord, type Lang } from '../data/types';
 import { useAuth } from '../state/auth';
 import { usePrefs } from '../state/prefs';
@@ -38,6 +39,7 @@ export default function BattleLobby() {
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState('');
   const [notice] = useState(navState?.notice ?? '');
+  const realtime = useRealtimeStatus();
   const open = unlocked && settings.battleEnabled;
   // 학급 배틀: 선생님이 켰고 반이 있는 학생이면 일반 배틀 잠금과 상관없이 입장
   const classOpen = !!settings.classBattle && !!student && !isMemberId(student.id) && student.grade > 0 && student.classNo > 0;
@@ -85,7 +87,13 @@ export default function BattleLobby() {
       });
       nav(`/battle/${id}`);
     } catch (e) {
-      setError(e instanceof AppError && e.code === 'ROOM_FULL' ? '방이 가득 찼어요. 다시 시도해 주세요.' : '입장하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+      setError(
+        e instanceof AppError && e.code === 'ROOM_FULL'
+          ? '방이 가득 찼어요. 다시 시도해 주세요.'
+          : e instanceof AppError && e.code === 'NETWORK'
+            ? '실시간 배틀 서버에 연결하지 못했어요. 학교 인터넷에서 접속이 막혀 있을 수 있어요(아래 안내 참고).'
+            : '입장하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
+      );
       joiningRef.current = false;
       setJoining(false);
     }
@@ -114,7 +122,13 @@ export default function BattleLobby() {
       );
       nav(`/battle/${id}`);
     } catch (e) {
-      setError(e instanceof AppError && e.code === 'ROOM_FULL' ? '우리 반 방이 가득 찼어요.' : '입장하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+      setError(
+        e instanceof AppError && e.code === 'ROOM_FULL'
+          ? '우리 반 방이 가득 찼어요.'
+          : e instanceof AppError && e.code === 'NETWORK'
+            ? '실시간 배틀 서버에 연결하지 못했어요. 학교 인터넷에서 접속이 막혀 있을 수 있어요.'
+            : '입장하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
+      );
       joiningRef.current = false;
       setJoining(false);
     }
@@ -302,6 +316,7 @@ export default function BattleLobby() {
               </div>
             </button>
             {error && <div className="text-center text-sm text-miss">{error}</div>}
+            {realtime === 'down' && <RealtimeDownNotice />}
 
             <button
               onClick={solo}

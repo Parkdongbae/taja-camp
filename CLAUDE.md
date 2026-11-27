@@ -6,6 +6,8 @@
 - Vite + React 19 + TypeScript(strict) + Tailwind v4(`src/index.css` 의 `@theme` 토큰: `mint-50~700`, `ink`, `miss`, `gold`) + react-router-dom v7 + zustand
 - Firebase(Auth, Firestore, Realtime Database). **서버 함수·서비스 계정 없음**: 권한은 보안 규칙으로만 강제한다.
 - `.env` 에 Firebase 설정이 없으면 데모 모드(`localBackend`)로 동작한다.
+- 실서버를 건드리지 않는 시험: `npx firebase-tools emulators:start --only auth,firestore,database --project demo-taja` 를 띄우고 `.env.local` 에 데모 값과 `VITE_FIREBASE_EMULATOR=1`(개발 모드에서만 에뮬레이터에 연결)을 넣는다. 실제 규칙 파일이 그대로 적용된다.
+- 배틀·접속 현황은 Realtime Database(`*.firebasedatabase.app`, 웹소켓)를 쓴다. 연결이 안 되면 로비·방 화면에 안내(`components/battle/useRealtime.tsx`)가 뜨고 방 입장은 12초 뒤 'NETWORK' 오류로 끝난다.
 - 명령: `npm run dev`, `npm run build`(tsc 포함), `npm test`(vitest), `npm run setup`(다른 학교용 자동 설치: `scripts/setup.mjs` 가 Firebase 프로젝트·DB·로그인 방식·규칙·Hosting 까지 배포. 안내는 `docs/SETUP.md`)
 
 ## 폴더와 소유

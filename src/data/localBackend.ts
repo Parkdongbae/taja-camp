@@ -735,6 +735,11 @@ export function createLocalBackend(): Backend {
       return Date.now(); // 같은 PC 의 탭끼리는 시계가 같다
     },
 
+    watchConnection(cb) {
+      queueMicrotask(() => cb(true));
+      return () => undefined;
+    },
+
     watchRooms(tier, lang, cb) {
       return watch(
         [K.rooms],

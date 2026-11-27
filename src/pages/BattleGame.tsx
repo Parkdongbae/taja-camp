@@ -16,6 +16,7 @@ import { Btn, Kbd } from '../components/ui';
 import { BattleWaiting } from '../components/battle/BattleWaiting';
 import { BattlePlay, type BattleDriver } from '../components/battle/BattlePlay';
 import { BattleResult } from '../components/battle/BattleResult';
+import { RealtimeDownNotice, useRealtimeStatus } from '../components/battle/useRealtime';
 import { battlePool, battleRiddles, rewardKey, type LobbyState } from '../components/battle/battleUtil';
 import type { BattleRank } from '../engine/scoring';
 import { finishBattle } from '../state/record';
@@ -35,6 +36,7 @@ export default function BattleGame() {
   const [live, setLive] = useState<BattleRoom | null | undefined>(undefined);
   const [lastDone, setLastDone] = useState<BattleRoom | null>(null);
   const [starting, setStarting] = useState(false);
+  const realtime = useRealtimeStatus();
   const [error, setError] = useState('');
   const leftRef = useRef(false);
 
@@ -201,7 +203,15 @@ export default function BattleGame() {
   );
 
   if (!student) return null;
-  if (room === undefined || room === null) return <Dark>방에 연결하는 중...</Dark>;
+  if (room === undefined || room === null)
+    return (
+      <Dark>
+        <div className="space-y-4 text-center">
+          <div>방에 연결하는 중...</div>
+          {realtime === 'down' && <RealtimeDownNotice />}
+        </div>
+      </Dark>
+    );
 
   if (room.state === 'waiting') {
     if (!inRoom) return <Dark>로비로 돌아가는 중...</Dark>;

@@ -233,7 +233,16 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
       import('firebase/database'),
     ]);
     const app = appM.initializeApp(clean({ ...config }));
-    return { app, A, F, D, auth: A.getAuth(app), fs: F.getFirestore(app), db: D.getDatabase(app) };
+    const auth = A.getAuth(app);
+    const fs = F.getFirestore(app);
+    const db = D.getDatabase(app);
+    // 개발 시험용: VITE_FIREBASE_EMULATOR=1 이면 이 컴퓨터의 Firebase 에뮬레이터에 붙는다(실서버에 쓰지 않음)
+    if (import.meta.env.DEV && import.meta.env.VITE_FIREBASE_EMULATOR === '1') {
+      A.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+      F.connectFirestoreEmulator(fs, '127.0.0.1', 8080);
+      D.connectDatabaseEmulator(db, '127.0.0.1', 9000);
+    }
+    return { app, A, F, D, auth, fs, db };
   })();
 
   // ── 서버 시각 ──
@@ -574,6 +583,23 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
   }
 
   /** 대기 방에 들어가거나 새로 만든다. klass 가 있으면 학급 방(같은 klass 끼리), 없으면 일반 방(학급 방 제외). */
+  // 실시간 서버에 닿지 않으면(학교 망 차단 등) Firebase 는 끝없이 기다리므로 시간 제한을 둔다
+  function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const t = setTimeout(() => reject(new AppError('NETWORK', '실시간 서버에 연결하지 못했습니다.')), ms);
+      p.then(
+        (v) => {
+          clearTimeout(t);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(t);
+          reject(e);
+        },
+      );
+    });
+  }
+
   async function joinOrCreate(
     fb: Fb,
     tier: number,
@@ -1097,6 +1123,22 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
     // ── 배틀 ──
     serverNow,
 
+    watchConnection(cb) {
+      let off: Unsub | null = null;
+      let closed = false;
+      ready.then(
+        (fb) => {
+          if (closed) return;
+          off = fb.D.onValue(fb.D.ref(fb.db, '.info/connected'), (s) => cb(s.val() === true));
+        },
+        () => cb(false),
+      );
+      return () => {
+        closed = true;
+        off?.();
+      };
+    },
+
     watchRooms(tier: number, lang: Lang, cb: (rooms: BattleRoom[]) => void) {
       return authedSub(
         (fb) => {
@@ -1128,14 +1170,14 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
     },
 
     joinOrCreateRoom(tier, lang, me) {
-      return run((fb) => joinOrCreate(fb, tier, lang, me, null, BATTLE_DURATION_SEC));
+      return run((fb) => withTimeout(joinOrCreate(fb, tier, lang, me, null, BATTLE_DURATION_SEC), 12000));
     },
 
     joinOrCreateClassRoom(klass, lang, me, durationSec) {
       return run(async (fb) => {
         const k = parseKlass(klass);
         if (!k) throw new AppError('UNKNOWN', '학급 정보가 올바르지 않습니다.');
-        return joinOrCreate(fb, CLASS_TIER, lang, me, klassOf(k.grade, k.classNo), normalizeClassDuration(durationSec));
+        return withTimeout(joinOrCreate(fb, CLASS_TIER, lang, me, klassOf(k.grade, k.classNo), normalizeClassDuration(durationSec)), 12000);
       });
     },
 

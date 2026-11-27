@@ -72,6 +72,8 @@ export interface Backend {
   // ── 접속 현황 ──
   setPresence(p: Presence | null): void;
   watchPresence(cb: (list: Presence[]) => void): Unsub;
+  /** 실시간 서버(배틀·접속 현황용) 연결 상태. 데모 모드는 늘 true. */
+  watchConnection(cb: (connected: boolean) => void): Unsub;
 
   // ── 배틀 ──
   /** 서버 기준 현재 시각(ms). 모든 클라이언트가 같은 값을 얻어야 한다. */
