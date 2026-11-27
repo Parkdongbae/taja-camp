@@ -27,7 +27,7 @@ import {
   type TeacherApplicant,
 } from './types';
 import { isMemberId, memberIdOf, normalizeMemberName } from '../engine/member';
-import { CLASS_MAX_PLAYERS, CLASS_TIER, klassOf, normalizeClassDuration, parseKlass } from '../engine/classBattle';
+import { CLASS_MAX_PLAYERS, CLASS_TIER, klassOf, normalizeClassDuration, normalizeClassRate, parseKlass } from '../engine/classBattle';
 
 const P = 'taja.demo.';
 const K = {
@@ -821,7 +821,7 @@ export function createLocalBackend(): Backend {
       });
     },
 
-    async startRoom(roomId, fall) {
+    async startRoom(roomId, fall, rate) {
       const u = me();
       const myId = u && u.role === 'student' ? u.studentId : null;
       await roomLock((rs) => {
@@ -834,6 +834,7 @@ export function createLocalBackend(): Backend {
         r.startAt = Date.now() + 5000;
         r.startCount = Object.values(r.players).filter((p) => p.online !== false).length;
         if (fall) r.fall = { p1: fall.p1, p2: fall.p2, p4: fall.p4 };
+        if (r.klass && rate !== undefined) r.rate = normalizeClassRate(rate);
       });
     },
 

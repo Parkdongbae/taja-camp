@@ -176,6 +176,8 @@ export interface Settings {
   classBattle?: boolean;
   /** 학급 배틀 경기 시간(초). 기본 300 */
   classBattleSec?: number;
+  /** 학급 배틀에서 참가자 1명당 동시에 뜨는 낱말 수(0.5~2, 기본 1.5). 방이 시작될 때 room.rate 로 복사된다 */
+  classBattleRate?: number;
 }
 export const DEFAULT_SETTINGS: Settings = {
   battleEnabled: true,
@@ -195,6 +197,7 @@ export const DEFAULT_SETTINGS: Settings = {
   contentPick: [],
   classBattle: false,
   classBattleSec: 300,
+  classBattleRate: 1.5,
 };
 
 // ───────── 인증 ─────────
@@ -268,6 +271,8 @@ export interface BattleRoom {
   fall?: FallSpeed;
   /** 학급 배틀 방이면 "학년반"(예: 1학년 3반 = "13"). tier 는 CLASS_TIER 로 고정. 없으면 일반 방 */
   klass?: string;
+  /** 학급 방: 1명당 동시 낱말 수(시작할 때 설정에서 복사, 모든 참가자가 같은 일정을 만들기 위해). 없으면 1.5 */
+  rate?: number;
 }
 
 /** 학급 배틀 한 판의 결과(반 총점·참여 학생). 문서 id = 방 id */

@@ -8,6 +8,7 @@
 //   classStandings(records)   반별 최고 총점 순위
 //   latestOfClass(records, grade, classNo)   그 반의 가장 최근 결과
 //   dateLabel("2026-11-24") → "11월 24일"
+//   CLASS_RATES · CLASS_RATE_DEFAULT = 1.5 · normalizeClassRate(x)   1명당 동시 낱말 수(선생님이 수업 설정에서 고름)
 import type { BattleRoom, ClassBattleRecord } from '../data/types';
 import { todayString } from './scoring';
 
@@ -15,6 +16,14 @@ export const CLASS_TIER = 9;
 export const CLASS_MAX_PLAYERS = 40;
 export const CLASS_RP = 10;
 export const CLASS_DURATIONS = [120, 180, 300, 420, 600] as const;
+export const CLASS_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+export const CLASS_RATE_DEFAULT = 1.5;
+
+export function normalizeClassRate(x: unknown): number {
+  const n = Number(x);
+  if (!Number.isFinite(n) || n <= 0) return CLASS_RATE_DEFAULT;
+  return Math.max(0.5, Math.min(2, Math.round(n * 100) / 100));
+}
 
 export function normalizeClassDuration(sec: unknown): number {
   const n = Math.round(Number(sec));

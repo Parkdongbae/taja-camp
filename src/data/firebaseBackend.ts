@@ -34,7 +34,7 @@ import {
   type TeacherApplicant,
 } from './types';
 import { isMemberId, memberIdOf, normalizeMemberName } from '../engine/member';
-import { CLASS_MAX_PLAYERS, CLASS_TIER, klassOf, normalizeClassDuration, parseKlass } from '../engine/classBattle';
+import { CLASS_MAX_PLAYERS, CLASS_TIER, klassOf, normalizeClassDuration, normalizeClassRate, parseKlass } from '../engine/classBattle';
 
 export interface FirebaseConfig {
   apiKey: string;
@@ -172,6 +172,7 @@ function toRoom(id: string, v: unknown): BattleRoom | null {
     ...(r.fall && typeof r.fall === 'object' ? { fall: r.fall as FallSpeed } : {}),
     ...(r.mode === 'team' ? { mode: 'team' as const } : {}),
     ...(typeof r.klass === 'string' && parseKlass(r.klass) ? { klass: r.klass } : {}),
+    ...(r.rate !== undefined && r.rate !== null ? { rate: normalizeClassRate(r.rate) } : {}),
   };
 }
 
@@ -1270,7 +1271,7 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
       });
     },
 
-    startRoom(roomId, fall) {
+    startRoom(roomId, fall, rate) {
       return run(async (fb) => {
         const { D, db } = fb;
         const me = myStudentId();
@@ -1291,6 +1292,7 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
           cur.startAt = serverNow() + 5000;
           cur.startCount = Object.values(players).filter((p) => p.online !== false).length;
           if (fall) cur.fall = { p1: fall.p1, p2: fall.p2, p4: fall.p4 };
+          if (cur.klass && rate !== undefined) cur.rate = normalizeClassRate(rate);
           return cur;
         });
         if (!res.snapshot.exists()) throw new AppError('ROOM_GONE', '방이 사라졌습니다.');

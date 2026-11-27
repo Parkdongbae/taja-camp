@@ -9,7 +9,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { backend } from '../data';
 import { BATTLE_MAX_PLAYERS, type BattleRoom } from '../data/types';
 import { buildSchedule, normalizeFallSpeed } from '../engine/battle';
-import { CLASS_MAX_PLAYERS } from '../engine/classBattle';
+import { CLASS_MAX_PLAYERS, normalizeClassRate } from '../engine/classBattle';
 import { useAuth } from '../state/auth';
 import { useContent } from '../content';
 import { Btn, Kbd } from '../components/ui';
@@ -96,7 +96,8 @@ export default function BattleGame() {
     setStarting(true);
     setError('');
     try {
-      await backend.startRoom(roomId, normalizeFallSpeed(useAuth.getState().settings.fallSpeed));
+      const st = useAuth.getState().settings;
+      await backend.startRoom(roomId, normalizeFallSpeed(st.fallSpeed), normalizeClassRate(st.classBattleRate));
     } catch {
       setError('시작하지 못했어요. 다시 눌러 주세요.');
     } finally {
@@ -161,15 +162,17 @@ export default function BattleGame() {
   if (started && loaded && frozen.current?.key !== gameKey) frozen.current = { key: gameKey, words: liveWords };
   const words = started && frozen.current?.key === gameKey ? frozen.current.words : liveWords;
   const classRoom = !!room?.klass;
+  const classRate = room?.rate;
   const schedule = useMemo(
     () =>
       started && loaded
         ? buildSchedule(seed, battlePool(words, lang), startCount, durationSec, hasFall ? { p1: fall1, p2: fall2, p4: fall4 } : null, {
             riddles: battleRiddles(words, lang).keys(),
             classBattle: classRoom,
+            classRate: classRate,
           })
         : null,
-    [started, loaded, seed, startCount, durationSec, lang, words, hasFall, fall1, fall2, fall4, classRoom],
+    [started, loaded, seed, startCount, durationSec, lang, words, hasFall, fall1, fall2, fall4, classRoom, classRate],
   );
 
   const isClass = !!room?.klass;

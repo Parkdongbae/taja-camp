@@ -93,8 +93,8 @@ export interface Backend {
   setRoomDuration(roomId: string, sec: number): Promise<void>;
   /** 방장만, 대기 중일 때만. 개인전('ffa')·팀전('team')을 바꾼다. */
   setRoomMode(roomId: string, mode: 'ffa' | 'team'): Promise<void>;
-  /** 방장만. state=playing, startAt=serverNow()+5000, seed 확정. */
-  startRoom(roomId: string, fall?: FallSpeed): Promise<void>;
+  /** 방장만. state=playing, startAt=serverNow()+5000, seed 확정. rate 는 학급 방에만 복사(1명당 동시 낱말 수). */
+  startRoom(roomId: string, fall?: FallSpeed, rate?: number): Promise<void>;
   /** 낱말 선점. 내가 처음이면 true. 원자적(트랜잭션)이어야 한다. */
   claimWord(roomId: string, wordIndex: number, playerId: string): Promise<boolean>;
   /** 경기 종료 표시(누가 호출해도 됨, 여러 번 호출 안전). */

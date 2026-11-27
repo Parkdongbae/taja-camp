@@ -9,7 +9,7 @@ import { useContent } from '../../content';
 import { contentGroups, type ContentGroup } from '../../content/pick';
 import { Card } from '../../components/ui';
 import { BAD_WORD_COUNT, findBadWord, squash } from '../../engine/badwords';
-import { CLASS_DURATIONS, dateLabel, normalizeClassDuration } from '../../engine/classBattle';
+import { CLASS_DURATIONS, CLASS_RATES, dateLabel, normalizeClassDuration, normalizeClassRate } from '../../engine/classBattle';
 import { FALL_SPEED_MAX, FALL_SPEED_MIN, fallMsAt, normalizeFallSpeed } from '../../engine/battle';
 
 function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
@@ -426,6 +426,28 @@ export default function ClassSettings() {
                   }`}
                 >
                   {sec / 60}분
+                </button>
+              );
+            })}
+          </div>
+        </Row>
+        <Row
+          title="낱말 수"
+          desc={`참가자 1명당 화면에 동시에 뜨는 낱말 수(기본 1.5개). 30명이면 지금 설정으로 약 ${Math.min(60, 3 + Math.ceil(30 * normalizeClassRate(s.classBattleRate)))}개. 너무 많아 어지러우면 줄이세요. 다음에 시작하는 판부터 적용돼요.`}
+        >
+          <div className="flex gap-1.5">
+            {CLASS_RATES.map((r) => {
+              const on = normalizeClassRate(s.classBattleRate) === r;
+              return (
+                <button
+                  key={r}
+                  aria-pressed={on}
+                  onClick={() => void save({ classBattleRate: r })}
+                  className={`shrink-0 whitespace-nowrap rounded-xl border-2 px-3 py-1.5 text-sm font-bold transition ${
+                    on ? 'border-mint-500 bg-mint-50 text-mint-700' : 'border-mint-100 text-ink/60 hover:border-mint-300'
+                  }`}
+                >
+                  {r}개
                 </button>
               );
             })}

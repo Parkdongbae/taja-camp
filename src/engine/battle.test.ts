@@ -434,3 +434,20 @@ describe('학급 배틀: 인원에 비례한 낱말 수', () => {
     expect(maxVis).toBeGreaterThanOrEqual(concurrentCount(30, true));
   });
 });
+
+describe('학급 배틀: 1명당 낱말 수 설정', () => {
+  it('rate 에 따라 동시 낱말 수가 바뀐다', () => {
+    expect(concurrentCount(30, true, 0.5)).toBe(18);
+    expect(concurrentCount(30, true, 1)).toBe(33);
+    expect(concurrentCount(30, true)).toBe(48);
+    expect(concurrentCount(30, true, 2)).toBe(60);
+    expect(concurrentCount(30, true, 99)).toBe(60); // 2 로 제한
+    expect(concurrentCount(30, false, 0.5)).toBe(16); // 일반 배틀은 영향 없음
+  });
+  it('rate 가 작으면 일정의 낱말도 적다', () => {
+    const pool = Array.from({ length: 200 }, (_, i) => `낱말${'가나다라마바사아자차'[i % 10]}${'가나다라마바사아자차'[Math.floor(i / 10) % 10]}${'가나'[Math.floor(i / 100)]}`);
+    const lo = buildSchedule(9, pool, 30, 300, null, { classBattle: true, classRate: 0.5 });
+    const hi = buildSchedule(9, pool, 30, 300, null, { classBattle: true, classRate: 2 });
+    expect(hi.length).toBeGreaterThan(lo.length * 2);
+  });
+});

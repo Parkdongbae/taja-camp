@@ -20,12 +20,12 @@
 //   coopHits(claims): Map<낱말 번호, Record<학번, 시각>> · coopRequired(players): 접속 중인 참가자 학번들
 //   coopDone(hits, required): 모두 쳤는가
 //   BATTLE_DURATIONS = [60, 90, 120, 180, 300] · normalizeDuration(sec): 목록에 없으면 120
-//   concurrentCount(playerCount, classBattle?): number   보통 3 + 인원(4~16). 학급 배틀은 3 + 인원 × 1.5(올림, 최대 CLASS_CONCURRENT_MAX)
-//   laneCount(playerCount, classBattle?): 직각 축 칸 수
+//   concurrentCount(playerCount, classBattle?, rate?): number   보통 3 + 인원(4~16). 학급 배틀은 3 + 인원 × rate(기본 1.5, 올림, 최대 CLASS_CONCURRENT_MAX)
+//   laneCount(playerCount, classBattle?, rate?): 직각 축 칸 수
 //   fallMsAt(elapsedMs: number, durationMs: number): number   10000 → 6000 선형
 //   normalizeFallSpeed(x?): FallSpeed   점수별 낙하 속도(%)를 50~200 으로 정리(없으면 기본값)
-//   buildSchedule(seed: number, pool: string[], playerCount: number, durationSec: number, speed?: FallSpeed, opts?: { riddles?: Iterable<string>; classBattle?: boolean }): FallingWord[]
-//     - opts.classBattle 이면 인원에 비례해 동시 낱말 수를 늘린다(학급 배틀은 정원 40명).
+//   buildSchedule(seed: number, pool: string[], playerCount: number, durationSec: number, speed?: FallSpeed, opts?: { riddles?: Iterable<string>; classBattle?: boolean; classRate?: number }): FallingWord[]
+//     - opts.classBattle 이면 인원에 비례해 동시 낱말 수를 늘린다(1명당 opts.classRate 개, 기본 1.5. 학급 배틀은 정원 40명).
 //     - 피버(events.battleEvents) 동안에는 등장 간격이 0.6배로 줄어 낱말이 쏟아진다.
 //     - 역전 찬스 낱말(comeback, 2명 이상·경기 25% 이후 약 6%, +4점): 하위권(events.isUnderdog)에게만 보이고 그들만 칠 수 있다. 다른 효과 없음.
 //     - 뜻 낱말(riddle, opts.riddles 에 있는 낱말의 약 10%, +2점): 화면에는 뜻풀이가 떠다니고 낱말을 쳐야 한다. 깜빡과는 겹치지 않는다.
@@ -43,6 +43,7 @@ import { isTypeable, normalizeText } from './hangul';
 import { mulberry32, randInt, shuffle } from './rng';
 import { battleEvents, feverAt } from './events';
 import { DEFAULT_FALL_SPEED, type FallSpeed } from '../data/types';
+import { normalizeClassRate } from './classBattle';
 
 export const FALL_SPEED_MIN = 50;
 export const FALL_SPEED_MAX = 200;
@@ -149,16 +150,16 @@ export function normalizeDuration(sec: unknown): number {
 /** 학급 배틀 동시 낱말 수 상한(40명일 때 63 → 이 값) */
 export const CLASS_CONCURRENT_MAX = 60;
 
-export function concurrentCount(playerCount: number, classBattle = false): number {
+export function concurrentCount(playerCount: number, classBattle = false, rate?: number): number {
   const n = Math.floor(Math.max(1, playerCount));
-  // 학급 배틀은 한 반이 한 방에 모이므로 인원에 비례해 넉넉히(1명당 1.5개)
-  if (classBattle) return Math.max(4, Math.min(CLASS_CONCURRENT_MAX, 3 + Math.ceil(n * 1.5)));
+  // 학급 배틀은 한 반이 한 방에 모이므로 인원에 비례해(1명당 rate 개, 선생님이 고름)
+  if (classBattle) return Math.max(4, Math.min(CLASS_CONCURRENT_MAX, 3 + Math.ceil(n * normalizeClassRate(rate))));
   return Math.max(4, Math.min(16, 3 + n));
 }
 
 /** 직각 축을 나누는 칸 수: 느린 협동 낱말·피버 폭주에도 빈 칸이 남게 넉넉히 */
-export function laneCount(playerCount: number, classBattle = false): number {
-  return Math.ceil(concurrentCount(playerCount, classBattle) * 1.7) + 4;
+export function laneCount(playerCount: number, classBattle = false, rate?: number): number {
+  return Math.ceil(concurrentCount(playerCount, classBattle, rate) * 1.7) + 4;
 }
 
 /** 깜빡 낱말의 불투명도: 주기의 앞 55% 는 보이고 나머지는 사라진다(경계는 부드럽게). */
@@ -214,7 +215,7 @@ export function buildSchedule(
   playerCount: number,
   durationSec: number,
   speed?: FallSpeed | null,
-  opts?: { riddles?: Iterable<string>; classBattle?: boolean } | null,
+  opts?: { riddles?: Iterable<string>; classBattle?: boolean; classRate?: number } | null,
 ): FallingWord[] {
   const riddles = new Set<string>();
   for (const w of opts?.riddles ?? []) riddles.add(normalizeText(w).trim().replace(/\s+/g, ' '));
@@ -242,8 +243,8 @@ export function buildSchedule(
   ];
   const totalSize = uniq.length;
 
-  const conc = concurrentCount(playerCount, !!opts?.classBattle);
-  const lanes = laneCount(playerCount, !!opts?.classBattle);
+  const conc = concurrentCount(playerCount, !!opts?.classBattle, opts?.classRate);
+  const lanes = laneCount(playerCount, !!opts?.classBattle, opts?.classRate);
   const out: FallingWord[] = [];
   const laneOf: number[] = [];
   let count4 = 0;
