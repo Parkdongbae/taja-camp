@@ -95,8 +95,8 @@ export default function Login() {
       } else if (code === 'LOGIN_FAILED' || code === 'NOT_REGISTERED' || code === 'PERMISSION') {
         setErr(
           first
-            ? '학번과 이름이 명단과 다릅니다. 선생님께 등록을 요청하세요.'
-            : '학번·이름·PIN 을 확인하세요. 처음이라면 아래 "처음 접속"을 선택하세요.',
+            ? `학번 ${id} 이(가) 명단에 없거나 이름이 명단과 다릅니다. 선생님이 [선생님 모드 → 학생 관리]에서 학번과 이름을 먼저 등록해야 들어올 수 있어요.`
+            : '학번·이름·PIN 을 확인하세요. 처음이라면 아래 "처음 접속"을 선택하세요. 명단에 없는 학번이면 선생님께 등록을 요청하세요.',
         );
       } else if (code === 'NETWORK') {
         setErr('인터넷 연결을 확인하세요.');
