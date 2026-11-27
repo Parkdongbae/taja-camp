@@ -160,14 +160,16 @@ export default function BattleGame() {
   const gameKey = `${roomId}:${seed}`;
   if (started && loaded && frozen.current?.key !== gameKey) frozen.current = { key: gameKey, words: liveWords };
   const words = started && frozen.current?.key === gameKey ? frozen.current.words : liveWords;
+  const classRoom = !!room?.klass;
   const schedule = useMemo(
     () =>
       started && loaded
         ? buildSchedule(seed, battlePool(words, lang), startCount, durationSec, hasFall ? { p1: fall1, p2: fall2, p4: fall4 } : null, {
             riddles: battleRiddles(words, lang).keys(),
+            classBattle: classRoom,
           })
         : null,
-    [started, loaded, seed, startCount, durationSec, lang, words, hasFall, fall1, fall2, fall4],
+    [started, loaded, seed, startCount, durationSec, lang, words, hasFall, fall1, fall2, fall4, classRoom],
   );
 
   const isClass = !!room?.klass;

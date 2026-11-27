@@ -37,7 +37,7 @@
 - 배틀 이벤트(`engine/events.ts` 의 `battleEvents(seed, durationSec)`, 모두 seed 로 결정): 피버 10초(얻는 점수 2배, 낱말 등장 간격 0.6배), 안개·거꾸로 각 8초(화면 효과만).
 - 배틀 역전 찬스 낱말(`comeback`, +4): 순위가 아래 30%이고 1등보다 점수가 낮은 학생(`isUnderdog`)에게만 보인다. 뜻 낱말(`riddle`, +2): 뜻풀이를 보여 주고 낱말을 치게 한다(`buildSchedule` 의 `opts.riddles`, 화면은 `battleRiddles`).
 - 배틀 팀전: 대기실에서 방장이 고른다(`room.mode = 'team'`, `backend.setRoomMode`). 들어온 순서대로 홍·청 번갈아(`teamOf`), 팀 점수는 팀원 점수 합, 파워 회수는 상대 팀에게서만. RP 는 개인 순위 그대로. **`database.rules.json` 에 `mode` 칸이 추가돼 규칙 배포가 필요하다.**
-- 학급 배틀(`engine/classBattle.ts`): 교사가 수업 설정에서 켜고(`settings.classBattle`) 시간을 고른다(`classBattleSec`, 2·3·5·7·10분, 기본 5분). 같은 반이 한 방(`room.klass` = "학년반", tier 9 고정, 정원 40명)에 들어가고 먼저 들어온 학생이 시작한다. 자리 단계·계급과 상관없이 입장. 끝나면 반 총점·참여 학생을 Firestore `classBattles/{방 id}` 에 저장(참가자 누구나 같은 내용으로 덮어씀)하고 참여 점수 RP +10(`CLASS_RP`, 전적 제외). 홈에 우리 반 최근 결과(날짜·총점·참여 학생)와 반별 최고 총점 등수가 보인다. **`database.rules.json`(klass, startCount 40)·`firestore.rules`(classBattles) 배포가 필요하다.**
+- 학급 배틀(`engine/classBattle.ts`): 교사가 수업 설정에서 켜고(`settings.classBattle`) 시간을 고른다(`classBattleSec`, 2·3·5·7·10분, 기본 5분). 같은 반이 한 방(`room.klass` = "학년반", tier 9 고정, 정원 40명)에 들어가고 먼저 들어온 학생이 시작한다. 동시 낱말 수는 인원에 비례(`concurrentCount(n, true)` = 3 + 인원×1.5, 최대 60. `buildSchedule` 의 `opts.classBattle`). 자리 단계·계급과 상관없이 입장. 끝나면 반 총점·참여 학생을 Firestore `classBattles/{방 id}` 에 저장(참가자 누구나 같은 내용으로 덮어씀)하고 참여 점수 RP +10(`CLASS_RP`, 전적 제외). 홈에 우리 반 최근 결과(날짜·총점·참여 학생)와 반별 최고 총점 등수가 보인다. **`database.rules.json`(klass, startCount 40)·`firestore.rules`(classBattles) 배포가 필요하다.**
 - 배틀 결과 칭호: `engine/awards.ts` 의 `battleAwards`(속사포·한 방·선제 득점·막판 스퍼트·보너스 사냥꾼·협동왕·뜻풀이 박사·역전의 명수·피버왕·포인트 사냥꾼).
 - 배틀 경기 시간: 기본 120초. 대기실에서 방장이 60/90/120/180/300초 중에 고른다(`backend.setRoomDuration`). 컴퓨터 대결은 120초 고정.
 - 배틀 배경음: `components/bgm.ts`(Web Audio 합성). 소리가 켜져 있고 `usePrefs.bgm` 이 켜져 있을 때 경기 중에만 난다.
@@ -58,7 +58,7 @@
 - 새 패키지를 추가하지 않는다.
 
 ## 이미 만들어진 공용 코드 (새로 만들지 말고 쓸 것)
-- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 574건 통과 상태를 유지할 것.
+- `src/engine` (index.ts 로 묶어 내보냄): 각 파일 맨 위 주석이 공개 API. 테스트 576건 통과 상태를 유지할 것.
 - `src/data/index.ts` 의 `backend`, `src/state/auth.ts` 의 `useAuth()`({ready,user,student,settings}), `src/state/prefs.ts` 의 `usePrefs()`, `src/content/index.ts`(useContent, pickWords 등).
 - `src/state/record.ts`: 연습이 끝나면 반드시 `finishSession(rec, extra?)` 로 저장(배틀은 `finishBattle`). 학생 문서를 화면에서 직접 고치지 않는다(자리 연습 단계 완료 표시 `stageDrill` 만 예외로 `backend.updateStudent`).
 - `src/components/ui.tsx`(Modal, Btn, Card, Stat, Spinner, Kbd), `TierBadge.tsx`, `AppShell.tsx`(상단 바는 이미 있으므로 화면은 본문만 그린다. 본문 영역 높이는 `h-full`).

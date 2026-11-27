@@ -411,3 +411,26 @@ describe('visibleWords / wordY / matchSubmission', () => {
     expect(matchSubmission(sched, 5000, '')).toBeNull();
   });
 });
+
+describe('학급 배틀: 인원에 비례한 낱말 수', () => {
+  it('보통 배틀보다 많고 인원에 비례, 상한 있음', () => {
+    expect(concurrentCount(16, true)).toBe(27);
+    expect(concurrentCount(30, true)).toBe(48);
+    expect(concurrentCount(40, true)).toBe(60);
+    expect(concurrentCount(2, true)).toBe(6);
+    expect(concurrentCount(30)).toBe(16);
+  });
+  it('30명 학급 배틀 일정: 동시 낱말이 많고 같은 낱말 동시 2개 없음', () => {
+    const pool = Array.from({ length: 300 }, (_, i) => `낱말${'가나다라마바사아자차카타파하'[i % 14]}${'가나다라마바사아자차'[Math.floor(i / 14) % 10]}${'가나다'[Math.floor(i / 140)]}`);
+    const s = buildSchedule(5, pool, 30, 300, null, { classBattle: true });
+    const n = buildSchedule(5, pool, 30, 300);
+    expect(s.length).toBeGreaterThan(n.length * 2);
+    let maxVis = 0;
+    for (let t = 20000; t < 280000; t += 500) {
+      const vis = visibleWords(s, t);
+      maxVis = Math.max(maxVis, vis.length);
+      expect(new Set(vis.map((v) => v.text)).size).toBe(vis.length);
+    }
+    expect(maxVis).toBeGreaterThanOrEqual(concurrentCount(30, true));
+  });
+});
